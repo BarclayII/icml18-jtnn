@@ -4,6 +4,8 @@ import rdkit.Chem as Chem
 import torch.nn.functional as F
 from .nnutils import *
 from .chemutils import get_mol
+from networkx import Graph
+from dgl import DGLGraph
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
 
@@ -81,6 +83,83 @@ def mol2graph(mol_batch):
                 bgraph[b1,i] = b2
 
     return fatoms, fbonds, agraph, bgraph, scope
+
+def mol2dgl_ideal(smiles_batch):
+    '''
+    Get a batched DGLGraph object from the given batch of SMILES
+    '''
+    graphs = []
+    for smiles in smiles_batch:
+        mol = get_mol(smiles)
+        graph = Graph()
+        for atom in mol.GetAtoms():
+            graph.add_node(atom.GetIdx(), features=atom_features(atom))
+        for bond in mol.GetBonds():
+            graph.add_edge(
+                    bond.GetBeginAtom().GetIdx(),
+                    bond.GetEndAtom().GetIdx(),
+                    features=bond_features(bond),
+                    )
+        graphs.append(graph)
+
+    graphs = nx.disjoint_union_all(graphs)
+    # A small caveat:
+    # When an undirected graph is converted to a directed graph, the edge
+    # contents are duplicated by reference:
+    # >>> G = Graph()
+    # >>> G.add_nodes_from([0, 1])
+    # >>> G.add_edge(0, 1, l=[1,2,3,4,5])
+    # >>> H = DiGraph(G)
+    # >>> H[0][1]['l'].append(6)    # H[0][1]['l'] becomes [1,2,3,4,5,6]
+    # >>> H[1][0]['l']
+    # [1, 2, 3, 4, 5, 6]
+    #
+    # That essentially means, if I converted an undirected graph into a
+    # (directed) DGLGraph with preset edge tensors, I would like to have
+    # G[u][v] and G[v][u] share the preset ones (and only those ones).
+    # In this example, I think we are safe, because the edge features are
+    # inputs (hence not changed/replaced throughout the whole computation).
+    return DGLGraph(graphs)
+
+def mol2dgl(smiles_batch):
+    graphs = []
+    atom_feature_list = []
+    bond_feature_list = []
+    bond_begin_nodes = []
+    bond_end_nodes = []
+    n_nodes = 0
+    for smiles in smiles_batch:
+        mol = get_mol(smiles)
+        graph = Graph()
+        for atom in mol.GetAtoms():
+            graph.add_node(atom.GetIdx())
+            atom_feature_list.append(atom_features(atom))
+        for bond in mol.GetBonds():
+            begin_idx = bond.GetBeginAtom().GetIdx()
+            end_idx = bond.GetEndAtom().GetIdx()
+            features = bond_features(bond)
+            graph.add_edge(begin_idx, end_idx)
+            bond_feature_list.append(features)
+            bond_begin_nodes.append(begin_idx + n_nodes)
+            bond_end_nodes.append(end_idx + n_nodes)
+            # set up the reverse direction
+            bond_feature_list.append(features)
+            bond_begin_nodes.append(end_idx + n_nodes)
+            bond_end_nodes.append(begin_idx + n_nodes)
+
+        graphs.append(graph)
+
+    graphs = nx.disjoint_union_all(graphs)
+    dgl_graph = DGLGraph(graphs)
+    dgl_graph.set_n_repr({'features': torch.stack(atom_feature_list)})
+    dgl_graph.set_e_repr(
+            {'features': torch.stack(bond_feature_list)},
+            bond_begin_nodes,
+            bond_end_nodes,
+            )
+
+    return dgl_graph
+
 
 class MPN(nn.Module):
 
