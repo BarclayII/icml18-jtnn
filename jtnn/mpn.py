@@ -4,7 +4,7 @@ import rdkit.Chem as Chem
 import torch.nn.functional as F
 from .nnutils import *
 from .chemutils import get_mol
-from networkx import Graph
+from networkx import Graph, DiGraph, line_graph, convert_node_labels_to_integers
 from dgl import DGLGraph
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
@@ -102,7 +102,7 @@ def mol2dgl_ideal(smiles_batch):
                     )
         graphs.append(graph)
 
-    graphs = nx.disjoint_union_all(graphs)
+    graph = DiGraph(nx.disjoint_union_all(graph))
     # A small caveat:
     # When an undirected graph is converted to a directed graph, the edge
     # contents are duplicated by reference:
@@ -119,7 +119,19 @@ def mol2dgl_ideal(smiles_batch):
     # G[u][v] and G[v][u] share the preset ones (and only those ones).
     # In this example, I think we are safe, because the edge features are
     # inputs (hence not changed/replaced throughout the whole computation).
-    return DGLGraph(graphs)
+
+    # create a line graph to do loopy belief propagation
+    lgraph = line_graph(graph)
+    lgraph_edges = list(lgraph.edges)
+    for e in lgraph_edges:
+        (u1, v1), (u2, v2) = e
+        if u1 == v2 and u2 == v1:
+            lgraph.remove_edge(e)
+    for u, v in lgraph.nodes:
+        lgraph.nodes[u, v]['node_features'] = graph.nodes[u]['features']
+        lgraph.nodes[u, v]['edge_features'] = graph[u][v]['features']
+    lgraph = convert_node_labels_to_integers(lgraph, label_attribute='edge')
+    return DGLGraph(graph), DGLGraph(lgraph)
 
 def mol2dgl(smiles_batch):
     graphs = []
@@ -149,8 +161,20 @@ def mol2dgl(smiles_batch):
 
         graphs.append(graph)
 
-    graphs = nx.disjoint_union_all(graphs)
-    dgl_graph = DGLGraph(graphs)
+    graph = DiGraph(nx.disjoint_union_all(graphs))
+
+    # create a line graph for loopy BP
+    lgraph = line_graph(graph)
+    lgraph_edges = list(lgraph.edges)
+    for e in lgraph_edges:
+        (u1, v1), (u2, v2) = e
+        if u1 == v2 and u2 == v1:
+            lgraph.remove_edge(e)
+    lgraph = convert_node_labels_to_integers(lgraph, label_attribute='edge')
+
+
+    # batch set the node/edge features
+    dgl_graph = DGLGraph(graph)
     dgl_graph.set_n_repr({'features': torch.stack(atom_feature_list)})
     dgl_graph.set_e_repr(
             {'features': torch.stack(bond_feature_list)},
