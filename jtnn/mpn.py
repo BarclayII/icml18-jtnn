@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from .nnutils import *
 from .chemutils import get_mol
 from networkx import Graph, DiGraph, line_graph, convert_node_labels_to_integers
-from dgl import DGLGraph
+from dgl import DGLGraph, line_graph
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
 
@@ -134,55 +134,42 @@ def mol2dgl_ideal(smiles_batch):
     return DGLGraph(graph), DGLGraph(lgraph)
 
 def mol2dgl(smiles_batch):
-    graphs = []
+    graph = DGLGraph()
     atom_feature_list = []
     bond_feature_list = []
-    bond_begin_nodes = []
-    bond_end_nodes = []
+    bond_source_feature_list = []
     n_nodes = 0
     for smiles in smiles_batch:
         mol = get_mol(smiles)
-        graph = Graph()
         for atom in mol.GetAtoms():
-            graph.add_node(atom.GetIdx())
+            graph.add_node(atom.GetIdx() + n_nodes)
             atom_feature_list.append(atom_features(atom))
         for bond in mol.GetBonds():
-            begin_idx = bond.GetBeginAtom().GetIdx()
-            end_idx = bond.GetEndAtom().GetIdx()
+            begin_idx = bond.GetBeginAtom().GetIdx() + n_nodes
+            end_idx = bond.GetEndAtom().GetIdx() + n_nodes
             features = bond_features(bond)
             graph.add_edge(begin_idx, end_idx)
             bond_feature_list.append(features)
-            bond_begin_nodes.append(begin_idx + n_nodes)
-            bond_end_nodes.append(end_idx + n_nodes)
+            bond_source_feature_list.append(atom_feature_list[begin_idx])
             # set up the reverse direction
+            graph.add_edge(end_idx, begin_idx)
             bond_feature_list.append(features)
-            bond_begin_nodes.append(end_idx + n_nodes)
-            bond_end_nodes.append(begin_idx + n_nodes)
+            bond_source_feature_list.append(atom_feature_list[end_idx])
 
-        graphs.append(graph)
+        n_nodes += mol.GetNumAtoms()
 
-    graph = DiGraph(nx.disjoint_union_all(graphs))
-
-    # create a line graph for loopy BP
-    lgraph = line_graph(graph)
-    lgraph_edges = list(lgraph.edges)
-    for e in lgraph_edges:
-        (u1, v1), (u2, v2) = e
-        if u1 == v2 and u2 == v1:
-            lgraph.remove_edge(e)
-    lgraph = convert_node_labels_to_integers(lgraph, label_attribute='edge')
-
-
-    # batch set the node/edge features
-    dgl_graph = DGLGraph(graph)
-    dgl_graph.set_n_repr({'features': torch.stack(atom_feature_list)})
-    dgl_graph.set_e_repr(
-            {'features': torch.stack(bond_feature_list)},
-            bond_begin_nodes,
-            bond_end_nodes,
+    graph.set_n_repr({'features': torch.stack(atom_feature_list)})
+    graph.set_e_repr(
+            {'features': torch.stack(bond_feature_list),
+             'source_features': torch.stack(bond_source_feature_list)},
             )
 
-    return dgl_graph
+    lgraph = line_graph(graph)
+    for (u1, v1), (u2, v2) in lgraph.edge_list:
+        if u1 == v2 and u2 == v1:
+            lgraph.remove_edge((u1, v1), (u2, v2))
+
+    return graph, lgraph
 
 
 class MPN(nn.Module):
