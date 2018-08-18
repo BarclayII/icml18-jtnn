@@ -158,10 +158,13 @@ def mol2dgl(smiles_batch):
 
         n_nodes += mol.GetNumAtoms()
 
+    bond_features = torch.stack(bond_features)
+    source_features = torch.stack(source_features)
+
     graph.set_n_repr({'features': torch.stack(atom_feature_list)})
     graph.set_e_repr(
-            {'features': torch.stack(bond_feature_list),
-             'source_features': torch.stack(bond_source_feature_list)},
+            {'features': bond_features,
+             'source_features': source_features}
             )
 
     lgraph = line_graph(graph)
@@ -212,3 +215,50 @@ class MPN(nn.Module):
         mol_vecs = torch.stack(mol_vecs, dim=0)
         return mol_vecs
 
+
+def mpn_msg(src, edge):
+    return src['msg']
+
+
+def mpn_reduce(node, msgs):
+    return {'msg': torch.sum(msgs['msg'], 1)}
+
+
+class DGLMPNUpdate(nn.Module):
+    def __init__(self, hidden_size):
+        super(DGLMPNUpdate, self).__init__()
+        self.hidden_size = hidden_size
+
+        self.W_h = nn.Linear(hidden_size, hidden_size, bias=False)
+
+    def forward(self, node, accum):
+        msg_input = node['msg_input']
+        msg_delta = self.W_h(accum['msg'])
+        msg = F.relu(msg_input + msg_delta)
+        return {'msg': msg}
+
+
+class DGLMPN(nn.Module):
+    def __init__(self, hidden_size, depth):
+        super(DGLMPN, self).__init__()
+
+        self.depth = depth
+
+        self.W_i = nn.Linear(ATOM_FDIM + BOND_FDIM, hidden_size, bias=False)
+        self.W_o = nn.Linear(ATOM_FDIM + hidden_size, hidden_size)
+
+        self.updater = DGLMPNUpdate(hidden_size)
+
+    def forward(self, mol_graph):
+        mol_graph, mol_line_graph = mol_graph
+
+        bond_features = mol_line_graph.get_n_repr()['features']
+        source_features = mol_line_graph.get_n_repr()['source_features']
+
+        features = torch.cat(bond_features, source_features)
+        msg_input = self.W_i(features)
+        mol_line_graph.set_n_repr({'msg_input': msg_input})
+        mol_line_graph.set_n_repr({'msg': msg_input.clone().zero_()})
+
+        for i in range(self.depth):
+            pass
