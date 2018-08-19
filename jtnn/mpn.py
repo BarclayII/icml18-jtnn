@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from .nnutils import *
 from .chemutils import get_mol
 from networkx import Graph, DiGraph, line_graph, convert_node_labels_to_integers
-from dgl import DGLGraph, line_graph
+from dgl import DGLGraph, line_graph, batch, unbatch
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
 
@@ -134,19 +134,20 @@ def mol2dgl_ideal(smiles_batch):
     return DGLGraph(graph), DGLGraph(lgraph)
 
 def mol2dgl(smiles_batch):
-    graph = DGLGraph()
-    atom_feature_list = []
-    bond_feature_list = []
-    bond_source_feature_list = []
     n_nodes = 0
+    graph_list = []
     for smiles in smiles_batch:
+        atom_feature_list = []
+        bond_feature_list = []
+        bond_source_feature_list = []
+        graph = DGLGraph()
         mol = get_mol(smiles)
         for atom in mol.GetAtoms():
-            graph.add_node(atom.GetIdx() + n_nodes)
+            graph.add_node(atom.GetIdx())
             atom_feature_list.append(atom_features(atom))
         for bond in mol.GetBonds():
-            begin_idx = bond.GetBeginAtom().GetIdx() + n_nodes
-            end_idx = bond.GetEndAtom().GetIdx() + n_nodes
+            begin_idx = bond.GetBeginAtom().GetIdx()
+            end_idx = bond.GetEndAtom().GetIdx()
             features = bond_features(bond)
             graph.add_edge(begin_idx, end_idx)
             bond_feature_list.append(features)
@@ -156,23 +157,14 @@ def mol2dgl(smiles_batch):
             bond_feature_list.append(features)
             bond_source_feature_list.append(atom_feature_list[end_idx])
 
-        n_nodes += mol.GetNumAtoms()
+        graph.set_n_repr({'features': torch.stack(atom_feature_list)})
+        graph.set_e_repr(
+                {'features': torch.stack(bond_feature_list),
+                 'source_features': torch.stack(bond_source_feature_list)}
+                )
+        graph_list.append(graph)
 
-    bond_features = torch.stack(bond_features)
-    source_features = torch.stack(source_features)
-
-    graph.set_n_repr({'features': torch.stack(atom_feature_list)})
-    graph.set_e_repr(
-            {'features': bond_features,
-             'source_features': source_features}
-            )
-
-    lgraph = line_graph(graph)
-    for (u1, v1), (u2, v2) in lgraph.edge_list:
-        if u1 == v2 and u2 == v1:
-            lgraph.remove_edge((u1, v1), (u2, v2))
-
-    return graph, lgraph
+    return graph_list
 
 
 class MPN(nn.Module):
@@ -216,17 +208,17 @@ class MPN(nn.Module):
         return mol_vecs
 
 
-def mpn_msg(src, edge):
+def mpn_loopy_bp_msg(src, edge):
     return src['msg']
 
 
-def mpn_reduce(node, msgs):
-    return {'msg': torch.sum(msgs['msg'], 1)}
+def mpn_loopy_bp_reduce(node, msgs):
+    return {'msg': torch.sum(msgs, 1)}
 
 
-class DGLMPNUpdate(nn.Module):
+class LoopyBPUpdate(nn.Module):
     def __init__(self, hidden_size):
-        super(DGLMPNUpdate, self).__init__()
+        super(LoopyBPUpdate, self).__init__()
         self.hidden_size = hidden_size
 
         self.W_h = nn.Linear(hidden_size, hidden_size, bias=False)
@@ -238,6 +230,27 @@ class DGLMPNUpdate(nn.Module):
         return {'msg': msg}
 
 
+def mpn_gather_msg(src, edge):
+    return edge['msg']
+
+
+def mpn_gather_reduce(node, msgs):
+    return {'msg': torch.sum(msgs, 1)}
+
+
+class GatherUpdate(nn.Module):
+    def __init__(self, hidden_size):
+        super(GatherUpdate, self).__init__()
+        self.hidden_size = hidden_size
+
+        self.W_o = nn.Linear(ATOM_FDIM + hidden_size, hidden_size)
+
+    def forward(self, node, accum):
+        return {
+            'h': F.relu(self.W_o(torch.cat([node['features'], accum['msg']], 1)))
+        }
+
+
 class DGLMPN(nn.Module):
     def __init__(self, hidden_size, depth):
         super(DGLMPN, self).__init__()
@@ -245,20 +258,28 @@ class DGLMPN(nn.Module):
         self.depth = depth
 
         self.W_i = nn.Linear(ATOM_FDIM + BOND_FDIM, hidden_size, bias=False)
-        self.W_o = nn.Linear(ATOM_FDIM + hidden_size, hidden_size)
 
-        self.updater = DGLMPNUpdate(hidden_size)
+        self.loopy_bp_updater = LoopyBPUpdate(hidden_size)
+        self.gather_updater = GatherUpdate(hidden_size)
 
-    def forward(self, mol_graph):
-        mol_graph, mol_line_graph = mol_graph
+    def forward(self, mol_graph_list):
+        mol_graph = batch(mol_graph_list)
+        mol_line_graph = line_graph(mol_graph)
 
         bond_features = mol_line_graph.get_n_repr()['features']
         source_features = mol_line_graph.get_n_repr()['source_features']
 
-        features = torch.cat(bond_features, source_features)
+        features = torch.cat([bond_features, source_features], 1)
         msg_input = self.W_i(features)
         mol_line_graph.set_n_repr({'msg_input': msg_input})
         mol_line_graph.set_n_repr({'msg': msg_input.clone().zero_()})
 
         for i in range(self.depth):
-            pass
+            mol_line_graph.update_all(mpn_loopy_bp_msg, mpn_loopy_bp_reduce, self.loopy_bp_updater, True)
+
+        mol_graph.update_all(mpn_gather_msg, mpn_gather_reduce, self.gather_updater, True)
+
+        mol_graph_list = unbatch(mol_graph)
+        g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in mol_graph_list], 0)
+
+        return g_repr
