@@ -3,6 +3,7 @@ import torch.nn as nn
 from collections import deque
 from .mol_tree import Vocab, MolTree
 from .nnutils import create_var, GRU
+import itertools
 
 MAX_NB = 8
 
@@ -114,3 +115,29 @@ def node_aggregate(nodes, h, embedding, W):
     node_vec = torch.cat([x_vec, sum_h_nei], dim=1)
     return nn.ReLU()(W(node_vec))
 
+
+class DGLJTNNEncoder(nn.Module):
+    def __init__(self, vocab, hidden_size, embedding=None):
+        super(JTNNEncoder, self).__init__()
+        self.hidden_size = hidden_size
+        self.vocab_size = vocab.size()
+        self.vocab = vocab
+        
+        if embedding is None:
+            self.embedding = nn.Embedding(self.vocab_size, hidden_size)
+        else:
+            self.embedding = embedding
+
+        self.W_z = nn.Linear(2 * hidden_size, hidden_size)
+        self.W_r = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.U_r = nn.Linear(hidden_size, hidden_size)
+        self.W_h = nn.Linear(2 * hidden_size, hidden_size)
+        self.W = nn.Linear(2 * hidden_size, hidden_size)
+
+    def forward(self, mol_trees):
+        orders = []
+        for tree in mol_trees:
+            order = []
+            for u, vs in nx.bfs_successors(tree, 0):
+                order.append([(u, v) for v in vs])
+            orders.append(order)

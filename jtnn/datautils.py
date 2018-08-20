@@ -45,7 +45,7 @@ class PropDataset(Dataset):
         mol_tree.assemble()
         return mol_tree, self.prop_data[idx]
 
-class NXPropDataset(Dataset):
+class NXPropDataset(PropDataset):
     def __getitem__(self, idx):
         from .mol_tree_nx import NXMolTree
         smiles = self.data[idx]

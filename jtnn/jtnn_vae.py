@@ -4,7 +4,7 @@ from .mol_tree import Vocab, MolTree
 from .nnutils import create_var
 from .jtnn_enc import JTNNEncoder
 from .jtnn_dec import JTNNDecoder
-from .mpn import MPN, mol2graph
+from .mpn import MPN, mol2graph, DGLMPN, mol2dgl
 from .jtmpn import JTMPN
 
 from .chemutils import enum_assemble, set_atommap, copy_edit_mol, attach_mols, atom_equal, decode_stereo
@@ -309,3 +309,23 @@ class JTNNVAE(nn.Module):
             if result: return cur_mol
 
         return None
+
+
+class DGLJTNNVAE(nn.Module):
+
+    def __init__(self, vocab, hidden_size, latent_size, depth):
+        super(DGLJTNNVAE, self).__init__()
+        self.vocab = vocab
+        self.hidden_size = hidden_size
+        self.latent_size = latent_size
+        self.depth = depth
+
+        self.embedding = nn.Embedding(vocab.size(), hidden_size)
+        self.mpn = DGLMPN(hidden_size, depth)
+        self.jtnn = DGLJTNNEncoder(vocab, hidden_size, self.embedding)
+
+    def encode(self, mol_batch):
+        smiles_batch = [mol_tree.smiles for mol_tree in mol_batch]
+        mol_vec = self.mpn(mol2dgl(smiles_batch))
+        # mol_batch is a junction tree
+        tree_mess, tree_vec = self.jtnn(mol_batch)
