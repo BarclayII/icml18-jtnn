@@ -155,6 +155,15 @@ class DGLJTNNEncoder(nn.Module):
         level_iter = level_order(
                 mol_tree_batch, mol_tree_batch.node_offset[:-1])
 
+        n_nodes = len(mol_tree_batch.nodes)
+
+        mol_tree_batch.set_n_repr({
+            'm': torch.zeros(n_nodes, self.hidden_size),
+            's': torch.zeros(n_nodes, self.hidden_size),
+            'r': torch.zeros(n_nodes, self.hidden_size),
+            'z': torch.zeros(n_nodes, self.hidden_size),
+            })
+
         mol_tree_batch.propagate(
                 enc_tree_msg, enc_tree_reduce, enc_tree_update, True, level_iter)
 

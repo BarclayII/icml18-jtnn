@@ -22,6 +22,17 @@ def set_batch_nodeID(mol_batch, vocab):
             node.wid = vocab.get_index(node.smiles)
             tot += 1
 
+
+def dgl_set_batch_nodeID(mol_batch, vocab):
+    tot = 0
+    for mol_tree in mol_batch:
+        wid = []
+        for node in mol_tree.nodes:
+            node['idx'] = tot
+            wid.append(vocab.get_index(node['smiles']))
+        mol_tree.set_n_repr({'wid': torch.LongTensor(wid)})
+
+
 class JTNNVAE(nn.Module):
 
     def __init__(self, vocab, hidden_size, latent_size, depth):
