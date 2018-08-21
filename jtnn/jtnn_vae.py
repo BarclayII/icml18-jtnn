@@ -35,12 +35,12 @@ class JTNNVAE(nn.Module):
         self.jtnn = JTNNEncoder(vocab, hidden_size, self.embedding)
         self.jtmpn = JTMPN(hidden_size, depth)
         self.mpn = MPN(hidden_size, depth)
-        self.decoder = JTNNDecoder(vocab, hidden_size, latent_size / 2, self.embedding)
+        self.decoder = JTNNDecoder(vocab, hidden_size, latent_size // 2, self.embedding)
 
-        self.T_mean = nn.Linear(hidden_size, latent_size / 2)
-        self.T_var = nn.Linear(hidden_size, latent_size / 2)
-        self.G_mean = nn.Linear(hidden_size, latent_size / 2)
-        self.G_var = nn.Linear(hidden_size, latent_size / 2)
+        self.T_mean = nn.Linear(hidden_size, latent_size // 2)
+        self.T_var = nn.Linear(hidden_size, latent_size // 2)
+        self.G_mean = nn.Linear(hidden_size, latent_size // 2)
+        self.G_var = nn.Linear(hidden_size, latent_size // 2)
         
         self.assm_loss = nn.CrossEntropyLoss(size_average=False)
         self.stereo_loss = nn.CrossEntropyLoss(size_average=False)

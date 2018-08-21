@@ -4,6 +4,8 @@ from collections import deque
 from .mol_tree import Vocab, MolTree
 from .nnutils import create_var, GRU
 import itertools
+import networkx as nx
+from dgl import batch, unbatch
 
 MAX_NB = 8
 
@@ -116,6 +118,18 @@ def node_aggregate(nodes, h, embedding, W):
     return nn.ReLU()(W(node_vec))
 
 
+def enc_tree_msg(src, edge):
+    pass
+
+
+def enc_tree_reduce(node, msgs):
+    pass
+
+
+def enc_tree_update(node, accum):
+    pass
+
+
 class DGLJTNNEncoder(nn.Module):
     def __init__(self, vocab, hidden_size, embedding=None):
         super(JTNNEncoder, self).__init__()
@@ -135,9 +149,39 @@ class DGLJTNNEncoder(nn.Module):
         self.W = nn.Linear(2 * hidden_size, hidden_size)
 
     def forward(self, mol_trees):
-        orders = []
-        for tree in mol_trees:
-            order = []
-            for u, vs in nx.bfs_successors(tree, 0):
-                order.append([(u, v) for v in vs])
-            orders.append(order)
+        mol_tree_batch = batch(mol_trees)
+        # root nodes are already 0 for each subgraph, so we can directly
+        # take the node_offset attribute to get the root node IDs
+        level_iter = level_order(
+                mol_tree_batch, mol_tree_batch.node_offset[:-1])
+
+        mol_tree_batch.propagate(
+                enc_tree_msg, enc_tree_reduce, enc_tree_update, True, level_iter)
+
+
+def level_order(forest, roots, reverse=False):
+    '''
+    Given the forest and the list of root nodes,
+    returns iterator of list of edges ordered by depth
+    '''
+    edge_list = []
+    node_depth = {}
+
+    edge_list.append([])
+
+    for root in roots:
+        node_depth[root] = 0
+        for u, v in nx.bfs_edges(forest, root):
+            node_depth[v] = node_depth[u] + 1
+            if len(edge_list) == node_depth[u]:
+                edge_list.append([])
+            edge_list[node_depth[u]].append((u, v))
+
+    if reverse:
+        for edges in reversed(edge_list):
+            u, v = zip(*edges)
+            yield v, u
+    else:
+        for edges in edge_list:
+            u, v = zip(*edges)
+            yield u, v
