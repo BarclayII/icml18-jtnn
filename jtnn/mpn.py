@@ -6,6 +6,7 @@ from .nnutils import *
 from .chemutils import get_mol
 from networkx import Graph, DiGraph, line_graph, convert_node_labels_to_integers
 from dgl import DGLGraph, line_graph, batch, unbatch
+from functools import partial
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
 
@@ -84,55 +85,6 @@ def mol2graph(mol_batch):
 
     return fatoms, fbonds, agraph, bgraph, scope
 
-def mol2dgl_ideal(smiles_batch):
-    '''
-    Get a batched DGLGraph object from the given batch of SMILES
-    '''
-    graphs = []
-    for smiles in smiles_batch:
-        mol = get_mol(smiles)
-        graph = Graph()
-        for atom in mol.GetAtoms():
-            graph.add_node(atom.GetIdx(), features=atom_features(atom))
-        for bond in mol.GetBonds():
-            graph.add_edge(
-                    bond.GetBeginAtom().GetIdx(),
-                    bond.GetEndAtom().GetIdx(),
-                    features=bond_features(bond),
-                    )
-        graphs.append(graph)
-
-    graph = DiGraph(nx.disjoint_union_all(graph))
-    # A small caveat:
-    # When an undirected graph is converted to a directed graph, the edge
-    # contents are duplicated by reference:
-    # >>> G = Graph()
-    # >>> G.add_nodes_from([0, 1])
-    # >>> G.add_edge(0, 1, l=[1,2,3,4,5])
-    # >>> H = DiGraph(G)
-    # >>> H[0][1]['l'].append(6)    # H[0][1]['l'] becomes [1,2,3,4,5,6]
-    # >>> H[1][0]['l']
-    # [1, 2, 3, 4, 5, 6]
-    #
-    # That essentially means, if I converted an undirected graph into a
-    # (directed) DGLGraph with preset edge tensors, I would like to have
-    # G[u][v] and G[v][u] share the preset ones (and only those ones).
-    # In this example, I think we are safe, because the edge features are
-    # inputs (hence not changed/replaced throughout the whole computation).
-
-    # create a line graph to do loopy belief propagation
-    lgraph = line_graph(graph)
-    lgraph_edges = list(lgraph.edges)
-    for e in lgraph_edges:
-        (u1, v1), (u2, v2) = e
-        if u1 == v2 and u2 == v1:
-            lgraph.remove_edge(e)
-    for u, v in lgraph.nodes:
-        lgraph.nodes[u, v]['node_features'] = graph.nodes[u]['features']
-        lgraph.nodes[u, v]['edge_features'] = graph[u][v]['features']
-    lgraph = convert_node_labels_to_integers(lgraph, label_attribute='edge')
-    return DGLGraph(graph), DGLGraph(lgraph)
-
 def mol2dgl(smiles_batch):
     n_nodes = 0
     graph_list = []
@@ -184,20 +136,28 @@ class MPN(nn.Module):
         fbonds = create_var(fbonds)
         agraph = create_var(agraph)
         bgraph = create_var(bgraph)
+        self.agraph = agraph
 
         binput = self.W_i(fbonds)
+        self.binput = binput
         message = nn.ReLU()(binput)
+        self.message0 = message
 
         for i in range(self.depth - 1):
             nei_message = index_select_ND(message, 0, bgraph)
             nei_message = nei_message.sum(dim=1)
+            self.nei_message = nei_message
             nei_message = self.W_h(nei_message)
             message = nn.ReLU()(binput + nei_message)
+            self.message = message
 
         nei_message = index_select_ND(message, 0, agraph)
         nei_message = nei_message.sum(dim=1)
+        self.atom_incoming_message = nei_message
+        self.fatoms = fatoms
         ainput = torch.cat([fatoms, nei_message], dim=1)
         atom_hiddens = nn.ReLU()(self.W_o(ainput))
+        self.atom_hiddens = atom_hiddens
         
         mol_vecs = []
         for st,le in scope:
@@ -213,7 +173,11 @@ def mpn_loopy_bp_msg(src, edge):
 
 
 def mpn_loopy_bp_reduce(node, msgs):
-    return {'msg': torch.sum(msgs, 1)}
+    return {
+        'msg': torch.sum(msgs, 1)
+        if msgs is not None else
+        node['msg'].clone().zero_()
+    }
 
 
 class LoopyBPUpdate(nn.Module):
@@ -234,8 +198,14 @@ def mpn_gather_msg(src, edge):
     return edge['msg']
 
 
-def mpn_gather_reduce(node, msgs):
-    return {'msg': torch.sum(msgs, 1)}
+def mpn_gather_reduce(node, msgs, dim, dev):
+    # TODO: this looks a bit unnatural
+    n_nodes = node['features'].shape[0]
+    return {
+        'msg': torch.sum(msgs, 1)
+        if msgs is not None else
+        torch.zeros(n_nodes, dim).to(device=dev)
+    }
 
 
 class GatherUpdate(nn.Module):
@@ -247,7 +217,8 @@ class GatherUpdate(nn.Module):
 
     def forward(self, node, accum):
         return {
-            'h': F.relu(self.W_o(torch.cat([node['features'], accum['msg']], 1)))
+            'h': F.relu(self.W_o(torch.cat([node['features'], accum['msg']], 1))),
+            'm': accum['msg'],
         }
 
 
@@ -261,23 +232,35 @@ class DGLMPN(nn.Module):
 
         self.loopy_bp_updater = LoopyBPUpdate(hidden_size)
         self.gather_updater = GatherUpdate(hidden_size)
+        self.hidden_size = hidden_size
 
     def forward(self, mol_graph_list):
         mol_graph = batch(mol_graph_list)
-        mol_line_graph = line_graph(mol_graph)
+        mol_line_graph = line_graph(mol_graph, no_backtracking=True)
 
         bond_features = mol_line_graph.get_n_repr()['features']
         source_features = mol_line_graph.get_n_repr()['source_features']
 
-        features = torch.cat([bond_features, source_features], 1)
+        features = torch.cat([source_features, bond_features], 1)
         msg_input = self.W_i(features)
+        self.msg_input = msg_input
         mol_line_graph.set_n_repr({'msg_input': msg_input})
-        mol_line_graph.set_n_repr({'msg': msg_input.clone().zero_()})
+        mol_line_graph.set_n_repr({'msg': F.relu(msg_input)})
 
-        for i in range(self.depth):
+        for i in range(self.depth - 1):
             mol_line_graph.update_all(mpn_loopy_bp_msg, mpn_loopy_bp_reduce, self.loopy_bp_updater, True)
 
-        mol_graph.update_all(mpn_gather_msg, mpn_gather_reduce, self.gather_updater, True)
+        self.message = mol_line_graph.get_n_repr()['msg']
+
+        mpn_gather_reduce_with = partial(
+            mpn_gather_reduce, dim=self.hidden_size, dev=msg_input.device)
+
+        mol_graph.update_all(mpn_gather_msg, mpn_gather_reduce_with, self.gather_updater, True)
+
+        self.accum = mol_graph.get_n_repr()['m']
+        self.edge_list = mol_graph.edge_list
+        self.new_edge_list = mol_graph.new_edge_list
+        self.new_edges = mol_graph.new_edges
 
         mol_graph_list = unbatch(mol_graph)
         g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in mol_graph_list], 0)
