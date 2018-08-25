@@ -173,11 +173,7 @@ def mpn_loopy_bp_msg(src, edge):
 
 
 def mpn_loopy_bp_reduce(node, msgs):
-    return {
-        'msg': torch.sum(msgs, 1)
-        if msgs is not None else
-        node['msg'].clone().zero_()
-    }
+    return {'msg': torch.sum(msgs, 1)}
 
 
 class LoopyBPUpdate(nn.Module):
@@ -189,7 +185,7 @@ class LoopyBPUpdate(nn.Module):
 
     def forward(self, node, accum):
         msg_input = node['msg_input']
-        msg_delta = self.W_h(accum['msg'])
+        msg_delta = self.W_h(accum['msg']) if accum is not None else 0
         msg = F.relu(msg_input + msg_delta)
         return {'msg': msg}
 
@@ -198,14 +194,10 @@ def mpn_gather_msg(src, edge):
     return edge['msg']
 
 
-def mpn_gather_reduce(node, msgs, dim, dev):
+def mpn_gather_reduce(node, msgs):
     # TODO: this looks a bit unnatural
     n_nodes = node['features'].shape[0]
-    return {
-        'msg': torch.sum(msgs, 1)
-        if msgs is not None else
-        torch.zeros(n_nodes, dim).to(device=dev)
-    }
+    return {'msg': torch.sum(msgs, 1)}
 
 
 class GatherUpdate(nn.Module):
@@ -216,9 +208,13 @@ class GatherUpdate(nn.Module):
         self.W_o = nn.Linear(ATOM_FDIM + hidden_size, hidden_size)
 
     def forward(self, node, accum):
+        m = (torch.zeros(*node['features'].shape[:-1], self.hidden_size)
+             .to(node['features'])
+             if accum is None
+             else accum['msg'])
         return {
-            'h': F.relu(self.W_o(torch.cat([node['features'], accum['msg']], 1))),
-            'm': accum['msg'],
+            'h': F.relu(self.W_o(torch.cat([node['features'], m], 1))),
+            'm': m,
         }
 
 
@@ -252,10 +248,7 @@ class DGLMPN(nn.Module):
 
         self.message = mol_line_graph.get_n_repr()['msg']
 
-        mpn_gather_reduce_with = partial(
-            mpn_gather_reduce, dim=self.hidden_size, dev=msg_input.device)
-
-        mol_graph.update_all(mpn_gather_msg, mpn_gather_reduce_with, self.gather_updater, True)
+        mol_graph.update_all(mpn_gather_msg, mpn_gather_reduce, self.gather_updater, True)
 
         self.accum = mol_graph.get_n_repr()['m']
         self.edge_list = mol_graph.edge_list
