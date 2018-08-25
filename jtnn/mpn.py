@@ -136,28 +136,20 @@ class MPN(nn.Module):
         fbonds = create_var(fbonds)
         agraph = create_var(agraph)
         bgraph = create_var(bgraph)
-        self.agraph = agraph
 
         binput = self.W_i(fbonds)
-        self.binput = binput
         message = nn.ReLU()(binput)
-        self.message0 = message
 
         for i in range(self.depth - 1):
             nei_message = index_select_ND(message, 0, bgraph)
             nei_message = nei_message.sum(dim=1)
-            self.nei_message = nei_message
             nei_message = self.W_h(nei_message)
             message = nn.ReLU()(binput + nei_message)
-            self.message = message
 
         nei_message = index_select_ND(message, 0, agraph)
         nei_message = nei_message.sum(dim=1)
-        self.atom_incoming_message = nei_message
-        self.fatoms = fatoms
         ainput = torch.cat([fatoms, nei_message], dim=1)
         atom_hiddens = nn.ReLU()(self.W_o(ainput))
-        self.atom_hiddens = atom_hiddens
         
         mol_vecs = []
         for st,le in scope:
@@ -167,7 +159,7 @@ class MPN(nn.Module):
         mol_vecs = torch.stack(mol_vecs, dim=0)
         return mol_vecs
 
-
+# TODO: use SPMV
 def mpn_loopy_bp_msg(src, edge):
     return src['msg']
 
@@ -190,13 +182,12 @@ class LoopyBPUpdate(nn.Module):
         return {'msg': msg}
 
 
+# TODO: can we use SPMV?
 def mpn_gather_msg(src, edge):
     return edge['msg']
 
 
 def mpn_gather_reduce(node, msgs):
-    # TODO: this looks a bit unnatural
-    n_nodes = node['features'].shape[0]
     return {'msg': torch.sum(msgs, 1)}
 
 
@@ -239,21 +230,13 @@ class DGLMPN(nn.Module):
 
         features = torch.cat([source_features, bond_features], 1)
         msg_input = self.W_i(features)
-        self.msg_input = msg_input
         mol_line_graph.set_n_repr({'msg_input': msg_input})
         mol_line_graph.set_n_repr({'msg': F.relu(msg_input)})
 
         for i in range(self.depth - 1):
             mol_line_graph.update_all(mpn_loopy_bp_msg, mpn_loopy_bp_reduce, self.loopy_bp_updater, True)
 
-        self.message = mol_line_graph.get_n_repr()['msg']
-
         mol_graph.update_all(mpn_gather_msg, mpn_gather_reduce, self.gather_updater, True)
-
-        self.accum = mol_graph.get_n_repr()['m']
-        self.edge_list = mol_graph.edge_list
-        self.new_edge_list = mol_graph.new_edge_list
-        self.new_edges = mol_graph.new_edges
 
         mol_graph_list = unbatch(mol_graph)
         g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in mol_graph_list], 0)
