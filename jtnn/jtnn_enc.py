@@ -118,54 +118,142 @@ def node_aggregate(nodes, h, embedding, W):
     return nn.ReLU()(W(node_vec))
 
 
+class DGLJTNNEncoderMessageModule(nn.Module):
+    def __init__(self, hidden_size):
+        nn.Module.__init__(self)
+        self.hidden_size = hidden_size
+        self.W_z = nn.Linear(2 * hidden_size, hidden_size)
+        self.W_h = nn.Linear(2 * hidden_size, hidden_size)
+        self.W_r = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.U_r = nn.Linear(hidden_size, hidden_size)
+
+    def forward(self, src, dst, edge):
+        z = torch.sigmoid(self.W_z(torch.cat([src['x'], src['s']], 1)))
+        m = torch.tanh(self.W_h(torch.cat([src['x'], src['rm']], 1)))
+        m = (1 - z) * src['s'] + z * m
+        r_1 = self.W_r(dst['x'])
+        r_2 = self.U_r(m)
+        r = torch.sigmoid(r_1 + r_2)
+        return {'z': z, 'm': m, 'r': r}
+
+
 def enc_tree_msg(src, edge):
-    pass
+    return {'z': edge['z'], 'm': edge['m'], 'r': edge['r']}
 
 
 def enc_tree_reduce(node, msgs):
-    pass
+    s = msgs['m'].sum(1)
+    rm = (msgs['m'] * msgs['r']).sum(1)
+    return {'s': s, 'rm': rm}
 
 
 def enc_tree_update(node, accum):
-    pass
+    return {'s': accum['s'], 'rm': accum['rm']}
+
+
+def enc_tree_final_msg(src, edge):
+    return {'m': edge['m']}
+
+
+def enc_tree_final_reduce(node, msgs):
+    return {'m': msgs['m'].sum(1)}
+
+
+class DGLJTNNEncoderFinalUpdateModule(nn.Module):
+    def __init__(self, hidden_size):
+        nn.Module.__init__(self)
+        self.W = nn.Linear(2 * hidden_size, hidden_size)
+
+    def forward(self, node, accum):
+        x = torch.cat([node['x'], accum['m']], 1)
+        return {'h': torch.relu(self.W(x))}
 
 
 class DGLJTNNEncoder(nn.Module):
     def __init__(self, vocab, hidden_size, embedding=None):
-        super(JTNNEncoder, self).__init__()
+        super(DGLJTNNEncoder, self).__init__()
         self.hidden_size = hidden_size
         self.vocab_size = vocab.size()
         self.vocab = vocab
-        
+
         if embedding is None:
             self.embedding = nn.Embedding(self.vocab_size, hidden_size)
         else:
             self.embedding = embedding
 
-        self.W_z = nn.Linear(2 * hidden_size, hidden_size)
-        self.W_r = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.U_r = nn.Linear(hidden_size, hidden_size)
-        self.W_h = nn.Linear(2 * hidden_size, hidden_size)
-        self.W = nn.Linear(2 * hidden_size, hidden_size)
+        self.enc_tree_msg = DGLJTNNEncoderMessageModule(self.hidden_size)
+        self.enc_tree_final_update = \
+                DGLJTNNEncoderFinalUpdateModule(self.hidden_size)
 
     def forward(self, mol_trees):
         mol_tree_batch = batch(mol_trees)
         # root nodes are already 0 for each subgraph, so we can directly
         # take the node_offset attribute to get the root node IDs
-        level_iter = level_order(
-                mol_tree_batch, mol_tree_batch.node_offset[:-1])
-
+        root_ids = mol_tree_batch.node_offset[:-1]
         n_nodes = len(mol_tree_batch.nodes)
+        n_edges = len(mol_tree_batch.edges)
 
+        wid = mol_tree_batch.get_n_repr()['wid']
+        x = self.embedding(wid)
+        mol_tree_batch.set_n_repr({'x': x})
+
+        # bottom-up phase
         mol_tree_batch.set_n_repr({
-            'm': torch.zeros(n_nodes, self.hidden_size),
             's': torch.zeros(n_nodes, self.hidden_size),
+            'm': torch.zeros(n_nodes, self.hidden_size),
             'r': torch.zeros(n_nodes, self.hidden_size),
-            'z': torch.zeros(n_nodes, self.hidden_size),
+            'rm': torch.zeros(n_nodes, self.hidden_size),
+            'h': torch.zeros(n_nodes, self.hidden_size),
+            })
+        mol_tree_batch.set_e_repr({
+            'z': torch.zeros(n_edges, self.hidden_size),
+            'm': torch.zeros(n_edges, self.hidden_size),
+            'r': torch.zeros(n_edges, self.hidden_size),
             })
 
-        mol_tree_batch.propagate(
-                enc_tree_msg, enc_tree_reduce, enc_tree_update, True, level_iter)
+        for u, v in level_order(mol_tree_batch, root_ids, reverse=True):
+            mol_tree_batch.update_edge(u, v, self.enc_tree_msg, batchable=True)
+            mol_tree_batch.update_by_edge(
+                    u, v, enc_tree_msg, enc_tree_reduce, enc_tree_update,
+                    batchable=True)
+
+        # move the message field and reinitialize everything and perform
+        # top-down phase
+        mol_tree_batch.set_e_repr({
+            'm1': mol_tree_batch.get_e_repr()['m'],
+            'z': torch.zeros(n_edges, self.hidden_size),
+            'm': torch.zeros(n_edges, self.hidden_size),
+            'r': torch.zeros(n_edges, self.hidden_size),
+            })
+        mol_tree_batch.set_n_repr({
+            's': torch.zeros(n_nodes, self.hidden_size),
+            'm': torch.zeros(n_nodes, self.hidden_size),
+            'r': torch.zeros(n_nodes, self.hidden_size),
+            'rm': torch.zeros(n_nodes, self.hidden_size),
+            'h': torch.zeros(n_nodes, self.hidden_size),
+            })
+
+        for u, v in level_order(mol_tree_batch, root_ids, reverse=False):
+            mol_tree_batch.update_edge(u, v, self.enc_tree_msg, batchable=True)
+            mol_tree_batch.update_by_edge(
+                    u, v, enc_tree_msg, enc_tree_reduce, enc_tree_update,
+                    batchable=True)
+
+        # Combine messages from both phases.  Since the edges in two phases
+        # are disjoint, we can simply add them together.
+        mol_tree_batch.set_e_repr({
+            'm': mol_tree_batch.get_e_repr()['m'] + mol_tree_batch.get_e_repr()['m1']
+            })
+
+        # compute tree vector by aggregating on root node
+        mol_tree_batch.update_to(
+                root_ids, enc_tree_final_msg, enc_tree_final_reduce,
+                self.enc_tree_final_update, batchable=True)
+
+        msgs = {e: m for e, m in zip(
+            mol_tree_batch.edge_list, mol_tree_batch.get_e_repr()['m'])}
+
+        return msgs, mol_tree_batch.get_n_repr(root_ids)['h']
 
 
 def level_order(forest, roots, reverse=False):

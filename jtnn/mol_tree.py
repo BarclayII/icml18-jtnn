@@ -91,6 +91,7 @@ class MolTree(object):
         self.smiles3D = Chem.MolToSmiles(mol, isomericSmiles=True)
         self.smiles2D = Chem.MolToSmiles(mol)
         self.stereo_cands = decode_stereo(self.smiles2D)
+        self.edges = []
 
         cliques, edges = tree_decomp(self.mol)
         self.nodes = []
@@ -105,9 +106,20 @@ class MolTree(object):
         for x,y in edges:
             self.nodes[x].add_neighbor(self.nodes[y])
             self.nodes[y].add_neighbor(self.nodes[x])
+            self.edges.append([x, y])
+            self.edges.append([y, x])
         
         if root > 0:
             self.nodes[0],self.nodes[root] = self.nodes[root],self.nodes[0]
+            for i in range(len(self.edges)):
+                if self.edges[i][0] == 0:
+                    self.edges[i][0] = root
+                elif self.edges[i][0] == root:
+                    self.edges[i][0] = 0
+                if self.edges[i][1] == 0:
+                    self.edges[i][1] = root
+                elif self.edges[i][1] == root:
+                    self.edges[i][1] = 0
 
         for i,node in enumerate(self.nodes):
             node.nid = i + 1
