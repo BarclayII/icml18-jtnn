@@ -8,8 +8,8 @@ from torch import nn
 import matplotlib.pyplot as plt
 from dgl import batch
 
-#smiles_batch = ['C1=CC=CC=C1C2=CC=CC=C2', 'C1=CC=CC=C1C(=O)O', 'c1ccccc1c2ccccc2']
-smiles_batch = ['C1=CC=CC=C1C(=O)O']
+smiles_batch = ['C1=CC=CC=C1C2=CC=CC=C2', 'C1=CC=CC=C1C(=O)O', 'Cc1ccccc1C(=O)C2CCCC2']
+#smiles_batch = ['C1=CC=CC=C1C(=O)O']
 
 def test_mpn():
     gl = mol2dgl(smiles_batch)
