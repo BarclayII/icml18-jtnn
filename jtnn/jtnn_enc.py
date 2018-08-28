@@ -5,7 +5,7 @@ from .mol_tree import Vocab, MolTree
 from .nnutils import create_var, GRU
 import itertools
 import networkx as nx
-from dgl import batch, unbatch
+from dgl import batch, unbatch, line_graph
 
 MAX_NB = 8
 
@@ -118,148 +118,11 @@ def node_aggregate(nodes, h, embedding, W):
     return nn.ReLU()(W(node_vec))
 
 
-class DGLJTNNEncoderMessageModule(nn.Module):
-    def __init__(self, hidden_size):
-        nn.Module.__init__(self)
-        self.hidden_size = hidden_size
-        self.W_z = nn.Linear(2 * hidden_size, hidden_size)
-        self.W_h = nn.Linear(2 * hidden_size, hidden_size)
-        self.W_r = nn.Linear(hidden_size, hidden_size, bias=False)
-        self.U_r = nn.Linear(hidden_size, hidden_size)
-
-    def forward(self, src, dst, edge):
-        z = torch.sigmoid(self.W_z(torch.cat([src['x'], src['s']], 1)))
-        m = torch.tanh(self.W_h(torch.cat([src['x'], src['rm']], 1)))
-        m = (1 - z) * src['s'] + z * m
-        r_1 = self.W_r(dst['x'])
-        r_2 = self.U_r(m)
-        r = torch.sigmoid(r_1 + r_2)
-        return {'z': z, 'm': m, 'r': r}
-
-
-def enc_tree_msg(src, edge):
-    return {'z': edge['z'], 'm': edge['m'], 'r': edge['r']}
-
-
-def enc_tree_reduce(node, msgs):
-    s = msgs['m'].sum(1)
-    rm = (msgs['m'] * msgs['r']).sum(1)
-    return {'s': s, 'rm': rm}
-
-
-def enc_tree_update(node, accum):
-    return {'s': accum['s'], 'rm': accum['rm']}
-
-
-def enc_tree_final_msg(src, edge):
-    return {'m': edge['m']}
-
-
-def enc_tree_final_reduce(node, msgs):
-    return {'m': msgs['m'].sum(1)}
-
-
-class DGLJTNNEncoderFinalUpdateModule(nn.Module):
-    def __init__(self, hidden_size):
-        nn.Module.__init__(self)
-        self.W = nn.Linear(2 * hidden_size, hidden_size)
-
-    def forward(self, node, accum):
-        x = torch.cat([node['x'], accum['m']], 1)
-        return {'h': torch.relu(self.W(x))}
-
-
-class DGLJTNNEncoder(nn.Module):
-    def __init__(self, vocab, hidden_size, embedding=None):
-        super(DGLJTNNEncoder, self).__init__()
-        self.hidden_size = hidden_size
-        self.vocab_size = vocab.size()
-        self.vocab = vocab
-
-        if embedding is None:
-            self.embedding = nn.Embedding(self.vocab_size, hidden_size)
-        else:
-            self.embedding = embedding
-
-        self.enc_tree_msg = DGLJTNNEncoderMessageModule(self.hidden_size)
-        self.enc_tree_final_update = \
-                DGLJTNNEncoderFinalUpdateModule(self.hidden_size)
-
-    def forward(self, mol_trees):
-        mol_tree_batch = batch(mol_trees)
-        # root nodes are already 0 for each subgraph, so we can directly
-        # take the node_offset attribute to get the root node IDs
-        root_ids = mol_tree_batch.node_offset[:-1]
-        n_nodes = len(mol_tree_batch.nodes)
-        n_edges = len(mol_tree_batch.edges)
-
-        wid = mol_tree_batch.get_n_repr()['wid']
-        x = self.embedding(wid)
-        mol_tree_batch.set_n_repr({'x': x})
-
-        # bottom-up phase
-        mol_tree_batch.set_n_repr({
-            's': torch.zeros(n_nodes, self.hidden_size),
-            'm': torch.zeros(n_nodes, self.hidden_size),
-            'r': torch.zeros(n_nodes, self.hidden_size),
-            'rm': torch.zeros(n_nodes, self.hidden_size),
-            'h': torch.zeros(n_nodes, self.hidden_size),
-            })
-        mol_tree_batch.set_e_repr({
-            'z': torch.zeros(n_edges, self.hidden_size),
-            'm': torch.zeros(n_edges, self.hidden_size),
-            'r': torch.zeros(n_edges, self.hidden_size),
-            })
-
-        for u, v in level_order(mol_tree_batch, root_ids, reverse=True):
-            mol_tree_batch.update_edge(u, v, self.enc_tree_msg, batchable=True)
-            mol_tree_batch.update_by_edge(
-                    u, v, enc_tree_msg, enc_tree_reduce, enc_tree_update,
-                    batchable=True)
-
-        # move the message field and reinitialize everything and perform
-        # top-down phase
-        mol_tree_batch.set_e_repr({
-            'm1': mol_tree_batch.get_e_repr()['m'],
-            'z': torch.zeros(n_edges, self.hidden_size),
-            'm': torch.zeros(n_edges, self.hidden_size),
-            'r': torch.zeros(n_edges, self.hidden_size),
-            })
-        mol_tree_batch.set_n_repr({
-            's': torch.zeros(n_nodes, self.hidden_size),
-            'm': torch.zeros(n_nodes, self.hidden_size),
-            'r': torch.zeros(n_nodes, self.hidden_size),
-            'rm': torch.zeros(n_nodes, self.hidden_size),
-            'h': torch.zeros(n_nodes, self.hidden_size),
-            })
-
-        for u, v in level_order(mol_tree_batch, root_ids, reverse=False):
-            mol_tree_batch.update_edge(u, v, self.enc_tree_msg, batchable=True)
-            mol_tree_batch.update_by_edge(
-                    u, v, enc_tree_msg, enc_tree_reduce, enc_tree_update,
-                    batchable=True)
-
-        # Combine messages from both phases.  Since the edges in two phases
-        # are disjoint, we can simply add them together.
-        mol_tree_batch.set_e_repr({
-            'm': mol_tree_batch.get_e_repr()['m'] + mol_tree_batch.get_e_repr()['m1']
-            })
-
-        # compute tree vector by aggregating on root node
-        mol_tree_batch.update_to(
-                root_ids, enc_tree_final_msg, enc_tree_final_reduce,
-                self.enc_tree_final_update, batchable=True)
-
-        msgs = {e: m for e, m in zip(
-            mol_tree_batch.edge_list, mol_tree_batch.get_e_repr()['m'])}
-
-        return msgs, mol_tree_batch.get_n_repr(root_ids)['h']
-
-
-def level_order(forest, roots, reverse=False):
+def level_order(forest, roots):
     '''
     Given the forest and the list of root nodes,
-    returns iterator of list of edges ordered by depth
+    returns iterator of list of edges ordered by depth, first in bottom-up
+    and then top-down
     '''
     edge_list = []
     node_depth = {}
@@ -274,11 +137,152 @@ def level_order(forest, roots, reverse=False):
                 edge_list.append([])
             edge_list[node_depth[u]].append((u, v))
 
-    if reverse:
-        for edges in reversed(edge_list):
-            u, v = zip(*edges)
-            yield v, u
-    else:
-        for edges in edge_list:
-            u, v = zip(*edges)
-            yield u, v
+    for edges in reversed(edge_list):
+        u, v = zip(*edges)
+        yield v, u
+    for edges in edge_list:
+        u, v = zip(*edges)
+        yield u, v
+
+
+def enc_tree_msg(src, edge):
+    return {'r': src['r'], 'm': src['m']}
+
+
+def enc_tree_reduce(node, msgs):
+    return {'s': msgs['m'].sum(1), 'rm': (msgs['r'] * msgs['m']).sum(1)}
+
+
+class EncoderUpdate(nn.Module):
+    def __init__(self, hidden_size):
+        nn.Module.__init__(self)
+        self.hidden_size = hidden_size
+
+        self.W_z = nn.Linear(2 * hidden_size, hidden_size)
+        self.W_r = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.U_r = nn.Linear(hidden_size, hidden_size)
+        self.W_h = nn.Linear(2 * hidden_size, hidden_size)
+
+    def forward(self, node, accum):
+        src_x = node['src_x']
+        dst_x = node['dst_x']
+        s = accum['s'] if accum is not None else (
+                src_x.new(*src_x.shape[:-1], self.hidden_size).zero_())
+        rm = accum['rm'] if accum is not None else (
+                src_x.new(*src_x.shape[:-1], self.hidden_size).zero_())
+        z = torch.sigmoid(self.W_z(torch.cat([src_x, s], 1)))
+        m = torch.tanh(self.W_h(torch.cat([src_x, rm], 1)))
+        m = (1 - z) * s + z * m
+        r_1 = self.W_r(dst_x)
+        r_2 = self.U_r(m)
+        r = torch.sigmoid(r_1 + r_2)
+
+        return {'s': s, 'm': m, 'r': r, 'z': z}
+
+
+def enc_tree_gather_msg(src, edge):
+    return edge['m']
+
+
+def enc_tree_gather_reduce(node, msgs):
+    return msgs.sum(1)
+
+
+class EncoderGatherUpdate(nn.Module):
+    def __init__(self, hidden_size):
+        nn.Module.__init__(self)
+        self.hidden_size = hidden_size
+
+        self.W = nn.Linear(2 * hidden_size, hidden_size)
+
+    def forward(self, node, accum):
+        x = node['x']
+        m = accum if accum is not None else (
+                x.new(*x.shape[:-1], self.hidden_size).zero_())
+        return {
+            'm': m,
+            'h': torch.relu(self.W(torch.cat([x, m], 1))),
+        }
+
+
+class DGLJTNNEncoder(nn.Module):
+    def __init__(self, vocab, hidden_size, embedding=None):
+        nn.Module.__init__(self)
+        self.hidden_size = hidden_size
+        self.vocab_size = vocab.size()
+        self.vocab = vocab
+        
+        if embedding is None:
+            self.embedding = nn.Embedding(self.vocab_size, hidden_size)
+        else:
+            self.embedding = embedding
+
+        self.enc_tree_update = EncoderUpdate(hidden_size)
+        self.enc_tree_gather_update = EncoderGatherUpdate(hidden_size)
+
+    def forward(self, mol_trees):
+        mol_tree_batch = batch(mol_trees)
+        # Since tree roots are designated to 0.  In the batched graph we can
+        # simply find the corresponding node ID by looking at node_offset
+        root_ids = mol_tree_batch.node_offset[:-1]
+        n_nodes = len(mol_tree_batch.nodes)
+        edge_list = mol_tree_batch.edge_list
+        n_edges = len(edge_list)
+
+        # Assign structure embeddings to tree nodes
+        mol_tree_batch.set_n_repr({
+            'x': self.embedding(mol_tree_batch.get_n_repr()['wid']),
+            'h': torch.zeros(n_nodes, self.hidden_size),
+        })
+
+        # Initialize the intermediate variables according to Eq (4)-(8).
+        # Also initialize the src_x and dst_x fields.
+        # TODO: context?
+        mol_tree_batch.set_e_repr({
+            's': torch.zeros(n_edges, self.hidden_size),
+            'm': torch.zeros(n_edges, self.hidden_size),
+            'r': torch.zeros(n_edges, self.hidden_size),
+            'z': torch.zeros(n_edges, self.hidden_size),
+            'src_x': torch.zeros(n_edges, self.hidden_size),
+            'dst_x': torch.zeros(n_edges, self.hidden_size),
+        })
+
+        # Send the source/destination node features to edges
+        mol_tree_batch.update_edge(
+            *zip(*edge_list),
+            lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
+            batchable=True,
+        )
+
+        # Build line graph to prepare for belief propagation
+        mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
+
+        # Message passing
+        # I exploited the fact that the reduce function is a sum of incoming
+        # messages, and the uncomputed messages are zero vectors.  Essentially,
+        # we can always compute s_ij as the sum of incoming m_ij, no matter
+        # if m_ij is actually computed or not.
+        for u, v in level_order(mol_tree_batch, root_ids):
+            eid = mol_tree_batch.get_edge_id(u, v)
+            mol_tree_batch_lg.update_to(
+                eid,
+                enc_tree_msg,
+                enc_tree_reduce,
+                self.enc_tree_update,
+                batchable=True,
+            )
+
+        # Readout
+        mol_tree_batch.update_all(
+            enc_tree_gather_msg,
+            enc_tree_gather_reduce,
+            self.enc_tree_gather_update,
+            batchable=True,
+        )
+
+        tree_mess = {}
+        for u, v in edge_list:
+            tree_mess[(u, v)] = mol_tree_batch.get_e_repr(u, v)['m']
+        root_vecs = mol_tree_batch.get_n_repr(root_ids)['h']
+
+        return tree_mess, root_vecs

@@ -8,7 +8,8 @@ from torch import nn
 import matplotlib.pyplot as plt
 from dgl import batch
 
-smiles_batch = ['C1=CC=CC=C1C2=CC=CC=C2', 'C1=CC=CC=C1C(=O)O', 'c1ccccc1c2ccccc2']
+#smiles_batch = ['C1=CC=CC=C1C2=CC=CC=C2', 'C1=CC=CC=C1C(=O)O', 'c1ccccc1c2ccccc2']
+smiles_batch = ['C1=CC=CC=C1C(=O)O']
 
 def test_mpn():
     gl = mol2dgl(smiles_batch)
@@ -48,11 +49,11 @@ def test_treeenc():
     dgl_set_batch_nodeID(nx_mol_batch, vocab)
 
     dgljtnn = DGLJTNNEncoder(vocab, 10, emb)
-    dgljtnn.enc_tree_msg.W_z = jtnn.W_z
-    dgljtnn.enc_tree_msg.W_h = jtnn.W_h
-    dgljtnn.enc_tree_msg.W_r = jtnn.W_r
-    dgljtnn.enc_tree_msg.U_r = jtnn.U_r
-    dgljtnn.enc_tree_final_update.W = jtnn.W
+    dgljtnn.enc_tree_update.W_z = jtnn.W_z
+    dgljtnn.enc_tree_update.W_h = jtnn.W_h
+    dgljtnn.enc_tree_update.W_r = jtnn.W_r
+    dgljtnn.enc_tree_update.U_r = jtnn.U_r
+    dgljtnn.enc_tree_gather_update.W = jtnn.W
 
     # TODO: preserve edge messages
     dgl_tree_mess, dgl_tree_vec = dgljtnn(nx_mol_batch)
@@ -69,5 +70,5 @@ def test_treeenc():
 
 
 if __name__ == '__main__':
-    #test_mpn()
+    test_mpn()
     test_treeenc()
