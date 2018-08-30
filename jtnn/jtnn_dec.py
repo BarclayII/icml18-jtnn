@@ -4,6 +4,8 @@ from .mol_tree import Vocab, MolTree, MolTreeNode
 from .nnutils import create_var, GRU
 from .chemutils import enum_assemble
 import copy
+import itertools
+from dgl import batch, line_graph
 
 MAX_NB = 8
 MAX_DECODE_LEN = 100
@@ -319,3 +321,146 @@ def can_assemble(node_x, node_y):
     cands = enum_assemble(node_x, neighbors)
     return len(cands) > 0
 
+
+def dfs_order(forest, roots):
+    '''
+    Returns edge source, edge destination, and tree ID
+    '''
+    edge_list = []
+
+    for i, root in enumerate(roots):
+        edge_list.append([])
+        # The following gives the DFS order on edge on a tree.
+        for u, v, t in nx.dfs_labeled_edges(forest, root):
+            if u == v or t == 'nontree':
+                continue
+            elif t == 'forward':
+                edge_list[-1].append((u, v, i))
+            elif t == 'reverse':
+                edge_list[-1].append((v, u, i))
+
+    for edges in itertools.zip_longest(*edge_list):
+        edges = (e for e in edges if e is not None)
+        u, v, i = zip(*edges)
+        yield u, v, i
+
+
+def dec_tree_node_msg(src, edge):
+    return edge['h']
+
+
+def dec_tree_node_reduce(node, msgs):
+    return msgs.sum(1)
+
+
+def dec_tree_node_update(node, accum):
+    n_nodes = node['x'].shape[0]
+    accum = accum if accum is not None else \
+            node['h'].clone().zero_()
+    new = node['h'].new(n_nodes).zero_().byte()
+    return {'h': accum, 'new': new}
+
+
+def dec_tree_edge_msg(src, edge):
+    return {'r': src['r'], 'm': src['m']}
+
+
+def dec_tree_edge_reduce(node, msgs):
+    return {'s': msgs['m'].sum(1), 'rm': (msgs['r'] * msgs['m']).sum(1)}
+
+
+class DGLJTNNDecoder(nn.Module):
+    def __init__(self, vocab, hidden_size, latent_size, embedding=None):
+        nn.Module.__init__(self)
+
+        self.hidden_size = hidden_size
+        self.vocab_size = vocab.size()
+        self.vocab = vocab
+
+        if embedding is None:
+            self.embedding = nn.Embedding(self.vocab_size, hidden_size)
+        else:
+            self.embedding = embedding
+
+        self.dec_tree_edge_update = GRUUpdate(hidden_size)
+
+    def forward(self, mol_tree_batch, tree_vec):
+        '''
+        The training procedure which computes the prediction loss given the
+        ground truth tree
+        '''
+        mol_tree_batch = batch(mol_trees)
+
+        root_ids = mol_tree_batch.node_offset[:-1]
+        n_nodes = len(mol_tree_batch.nodes)
+        edge_list = mol_tree_batch.edge_list
+        n_edges = len(edge_list)
+
+        mol_tree_batch.set_n_repr({
+            'x': self.embedding(mol_tree_batch.get_n_repr()['wid']),
+            'h': torch.zeros(n_nodes, self.hidden_size),
+            'new': torch.ones(n_nodes).byte(),  # whether it's newly generated node
+        })
+
+        mol_tree_batch.set_e_repr({
+            's': torch.zeros(n_edges, self.hidden_size),
+            'm': torch.zeros(n_edges, self.hidden_size),
+            'r': torch.zeros(n_edges, self.hidden_size),
+            'z': torch.zeros(n_edges, self.hidden_size),
+            'src_x': torch.zeros(n_edges, self.hidden_size),
+            'dst_x': torch.zeros(n_edges, self.hidden_size),
+        })
+
+        mol_tree_batch.update_edge(
+            *zip(*edge_list),
+            lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
+            batchable=True,
+        )
+
+        mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
+
+        # input tensors for stop prediction (p) and label prediction (q)
+        p_inputs = []
+        q_inputs = []
+        q_targets = []
+
+        # Predict root
+        mol_tree_batch.update_to(
+            root_ids,
+            dec_tree_node_msg,
+            dec_tree_node_reduce,
+            dec_tree_node_update,
+            batchable=True,
+        )
+        # Extract hidden states and store them for stop/label prediction
+        h = mol_tree_batch.get_n_repr(root_ids)['h']
+        x = mol_tree_batch.get_n_repr(root_ids)['x']
+        p_inputs.append(torch.cat([x, h, tree_vec], 1))
+        q_inputs.append(h)
+        q_targets.append(mol_tree_batch.get_n_repr(root_ids)['wid'])
+
+        for u, v, i in dfs_order(mol_tree_batch, root_ids):
+            eid = mol_tree_batch.get_edge_id(u, v)
+            mol_tree_batch_lg.update_to(
+                eid,
+                dec_tree_edge_msg,
+                dec_tree_edge_reduce,
+                self.dec_tree_edge_update,
+                batchable=True,
+            )
+            is_new = mol_tree_batch.get_n_repr(v)['new']
+            mol_tree_batch.update_to(
+                v,
+                dec_tree_node_msg,
+                dec_tree_node_reduce,
+                dec_tree_node_update,
+                batchable=True,
+            )
+            # Extract
+            h = mol_tree_batch.get_n_repr(v)['h']
+            x = mol_tree_batch.get_n_repr(v)['x']
+            p_inputs.append(torch.cat([x, h, tree_vec[i]], 1))
+            # Only newly generated nodes are needed for label prediction
+            # NOTE: The following works since the uncomputed messages are zeros.
+            q_inputs.append(h[is_new])
+            q_targets.append(mol_tree_batch.get_n_repr(v)['wid'][is_new])

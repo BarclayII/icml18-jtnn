@@ -46,6 +46,9 @@ def test_treeenc():
     tree_mess, tree_vec = jtnn(root_batch)
 
     nx_mol_batch = [DGLMolTree(smiles) for smiles in smiles_batch]
+    for nx_mol_tree in nx_mol_batch:
+        nx_mol_tree.recover()
+        nx_mol_tree.assemble()
     dgl_set_batch_nodeID(nx_mol_batch, vocab)
 
     dgljtnn = DGLJTNNEncoder(vocab, 10, emb)

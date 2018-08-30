@@ -33,3 +33,29 @@ def GRU(x, h_nei, W_z, W_r, U_r, W_h):
     return new_h
 
 
+class GRUUpdate(nn.Module):
+    def __init__(self, hidden_size):
+        nn.Module.__init__(self)
+        self.hidden_size = hidden_size
+
+        self.W_z = nn.Linear(2 * hidden_size, hidden_size)
+        self.W_r = nn.Linear(hidden_size, hidden_size, bias=False)
+        self.U_r = nn.Linear(hidden_size, hidden_size)
+        self.W_h = nn.Linear(2 * hidden_size, hidden_size)
+
+    def forward(self, node, accum):
+        src_x = node['src_x']
+        dst_x = node['dst_x']
+        s = accum['s'] if accum is not None else (
+                src_x.new(*src_x.shape[:-1], self.hidden_size).zero_())
+        rm = accum['rm'] if accum is not None else (
+                src_x.new(*src_x.shape[:-1], self.hidden_size).zero_())
+        z = torch.sigmoid(self.W_z(torch.cat([src_x, s], 1)))
+        m = torch.tanh(self.W_h(torch.cat([src_x, rm], 1)))
+        m = (1 - z) * s + z * m
+        r_1 = self.W_r(dst_x)
+        r_2 = self.U_r(m)
+        r = torch.sigmoid(r_1 + r_2)
+
+        return {'s': s, 'm': m, 'r': r, 'z': z}
+
