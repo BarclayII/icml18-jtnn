@@ -1,5 +1,6 @@
 from jtnn.mpn import mol2dgl, DGLMPN, MPN, mol2graph
 from jtnn.jtnn_enc import JTNNEncoder, DGLJTNNEncoder
+from jtnn.jtnn_dec import JTNNDecoder, DGLJTNNDecoder
 from jtnn.mol_tree import MolTree, Vocab
 from jtnn.mol_tree_nx import DGLMolTree
 from jtnn.jtnn_vae import set_batch_nodeID, dgl_set_batch_nodeID
@@ -11,6 +12,13 @@ from dgl import batch
 smiles_batch = ['C1=CC=CC=C1C2=CC=CC=C2', 'C1=CC=CC=C1C(=O)O', 'Cc1ccccc1C(=O)C2CCCC2']
 #smiles_batch = ['C1=CC=CC=C1C(=O)O']
 
+def allclose(a, b):
+    return torch.allclose(a, b, rtol=1e-4, atol=1e-7)
+
+def isclose(a, b):
+    return torch.isclose(a, b, rtol=1e-4, atol=1e-7)
+
+
 def test_mpn():
     gl = mol2dgl(smiles_batch)
     dglmpn = DGLMPN(10, 4)
@@ -21,11 +29,10 @@ def test_mpn():
 
     glb = batch(gl)
 
-
     result = dglmpn.forward(gl)
     mol_vec = mpn(mol2graph(smiles_batch))
 
-    assert torch.allclose(result, mol_vec)
+    assert allclose(result, mol_vec)
 
 
 def test_treeenc():
@@ -64,14 +71,52 @@ def test_treeenc():
     assert len(dgl_tree_mess) == len(tree_mess)
     fail = False
     for e in tree_mess:
-        if not torch.allclose(tree_mess[e], dgl_tree_mess[e]):
+        if not allclose(tree_mess[e], dgl_tree_mess[e][0]):
             fail = True
-            print(e, tree_mess[e], dgl_tree_mess[e])
+            print(e, tree_mess[e], dgl_tree_mess[e][0])
     assert not fail
 
-    assert torch.allclose(dgl_tree_vec, tree_vec)
+    assert allclose(dgl_tree_vec, tree_vec)
+
+
+def test_treedec():
+    mol_batch = [MolTree(smiles) for smiles in smiles_batch]
+    for mol_tree in mol_batch:
+        mol_tree.recover()
+        mol_tree.assemble()
+
+    tree_vec = torch.randn(len(mol_batch), 10)
+    vocab = [x.strip('\r\n ') for x in open('data/vocab.txt')]
+    vocab = Vocab(vocab)
+
+    set_batch_nodeID(mol_batch, vocab)
+
+    nx_mol_batch = [DGLMolTree(smiles) for smiles in smiles_batch]
+    for nx_mol_tree in nx_mol_batch:
+        nx_mol_tree.recover()
+        nx_mol_tree.assemble()
+    dgl_set_batch_nodeID(nx_mol_batch, vocab)
+
+    emb = nn.Embedding(vocab.size(), 10)
+    dgljtnn = DGLJTNNDecoder(vocab, 10, 10, emb)
+    dgl_p_loss, dgl_q_loss = dgljtnn(nx_mol_batch, tree_vec)
+
+    jtnn = JTNNDecoder(vocab, 10, 10, emb)
+    jtnn.W = dgljtnn.W
+    jtnn.U = dgljtnn.U
+    jtnn.W_o = dgljtnn.W_o
+    jtnn.U_s = dgljtnn.U_s
+    jtnn.W_z = dgljtnn.dec_tree_edge_update.W_z
+    jtnn.W_r = dgljtnn.dec_tree_edge_update.W_r
+    jtnn.U_r = dgljtnn.dec_tree_edge_update.U_r
+    jtnn.W_h = dgljtnn.dec_tree_edge_update.W_h
+    q_loss, p_loss, _, _ = jtnn(mol_batch, tree_vec)
+
+    assert isclose(p_loss, dgl_p_loss)
+    assert isclose(q_loss, dgl_q_loss)
 
 
 if __name__ == '__main__':
     test_mpn()
     test_treeenc()
+    test_treedec()

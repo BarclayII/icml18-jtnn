@@ -1,11 +1,13 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from .mol_tree import Vocab, MolTree, MolTreeNode
-from .nnutils import create_var, GRU
+from .nnutils import create_var, GRU, GRUUpdate
 from .chemutils import enum_assemble
 import copy
 import itertools
 from dgl import batch, line_graph
+import networkx as nx
 
 MAX_NB = 8
 MAX_DECODE_LEN = 100
@@ -324,7 +326,8 @@ def can_assemble(node_x, node_y):
 
 def dfs_order(forest, roots):
     '''
-    Returns edge source, edge destination, and tree ID
+    Returns edge source, edge destination, tree ID, and whether u is generating
+    a new children
     '''
     edge_list = []
 
@@ -335,18 +338,18 @@ def dfs_order(forest, roots):
             if u == v or t == 'nontree':
                 continue
             elif t == 'forward':
-                edge_list[-1].append((u, v, i))
+                edge_list[-1].append((u, v, i, 1))
             elif t == 'reverse':
-                edge_list[-1].append((v, u, i))
+                edge_list[-1].append((v, u, i, 0))
 
     for edges in itertools.zip_longest(*edge_list):
         edges = (e for e in edges if e is not None)
-        u, v, i = zip(*edges)
-        yield u, v, i
+        u, v, i, p = zip(*edges)
+        yield u, v, i, p
 
 
 def dec_tree_node_msg(src, edge):
-    return edge['h']
+    return edge['m']
 
 
 def dec_tree_node_reduce(node, msgs):
@@ -384,12 +387,18 @@ class DGLJTNNDecoder(nn.Module):
 
         self.dec_tree_edge_update = GRUUpdate(hidden_size)
 
-    def forward(self, mol_tree_batch, tree_vec):
+        self.W = nn.Linear(latent_size + hidden_size, hidden_size)
+        self.U = nn.Linear(latent_size + 2 * hidden_size, hidden_size)
+        self.W_o = nn.Linear(hidden_size, self.vocab_size)
+        self.U_s = nn.Linear(hidden_size, 1)
+
+    def forward(self, mol_trees, tree_vec):
         '''
         The training procedure which computes the prediction loss given the
         ground truth tree
         '''
         mol_tree_batch = batch(mol_trees)
+        n_trees = len(mol_trees)
 
         root_ids = mol_tree_batch.node_offset[:-1]
         n_nodes = len(mol_tree_batch.nodes)
@@ -421,6 +430,7 @@ class DGLJTNNDecoder(nn.Module):
 
         # input tensors for stop prediction (p) and label prediction (q)
         p_inputs = []
+        p_targets = []
         q_inputs = []
         q_targets = []
 
@@ -436,10 +446,17 @@ class DGLJTNNDecoder(nn.Module):
         h = mol_tree_batch.get_n_repr(root_ids)['h']
         x = mol_tree_batch.get_n_repr(root_ids)['x']
         p_inputs.append(torch.cat([x, h, tree_vec], 1))
-        q_inputs.append(h)
+        t_set = list(range(len(root_ids)))
+        q_inputs.append(torch.cat([h, tree_vec], 1))
         q_targets.append(mol_tree_batch.get_n_repr(root_ids)['wid'])
 
-        for u, v, i in dfs_order(mol_tree_batch, root_ids):
+        # Traverse the tree and predict on children
+        for u, v, i, p in dfs_order(mol_tree_batch, root_ids):
+            assert set(t_set).issuperset(i)
+            ip = dict(zip(i, p))
+            # TODO: context
+            p_targets.append(torch.tensor([ip.get(_i, 0) for _i in t_set]))
+            t_set = list(i)
             eid = mol_tree_batch.get_edge_id(u, v)
             mol_tree_batch_lg.update_to(
                 eid,
@@ -459,8 +476,25 @@ class DGLJTNNDecoder(nn.Module):
             # Extract
             h = mol_tree_batch.get_n_repr(v)['h']
             x = mol_tree_batch.get_n_repr(v)['x']
-            p_inputs.append(torch.cat([x, h, tree_vec[i]], 1))
+            p_inputs.append(torch.cat([x, h, tree_vec[t_set]], 1))
             # Only newly generated nodes are needed for label prediction
             # NOTE: The following works since the uncomputed messages are zeros.
-            q_inputs.append(h[is_new])
+            q_inputs.append(torch.cat([h[is_new], tree_vec[t_set][is_new]], 1))
             q_targets.append(mol_tree_batch.get_n_repr(v)['wid'][is_new])
+        p_targets.append(torch.tensor([0 for _ in t_set]))
+
+        # Batch compute the stop/label prediction losses
+        p_inputs = torch.cat(p_inputs, 0)
+        p_targets = torch.cat(p_targets, 0)
+        q_inputs = torch.cat(q_inputs, 0)
+        q_targets = torch.cat(q_targets, 0)
+
+        q = self.W_o(torch.relu(self.W(q_inputs)))
+        p = self.U_s(torch.relu(self.U(p_inputs)))[:, 0]
+
+        p_loss = F.binary_cross_entropy_with_logits(
+            p, p_targets.float(), size_average=False
+        ) / n_trees
+        q_loss = F.cross_entropy(q, q_targets, size_average=False) / n_trees
+
+        return p_loss, q_loss

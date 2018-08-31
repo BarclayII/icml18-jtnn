@@ -110,10 +110,11 @@ def mol2dgl(smiles_batch):
             bond_source_feature_list.append(atom_feature_list[end_idx])
 
         graph.set_n_repr({'features': torch.stack(atom_feature_list)})
-        graph.set_e_repr(
-                {'features': torch.stack(bond_feature_list),
-                 'source_features': torch.stack(bond_source_feature_list)}
-                )
+        if len(bond_feature_list) > 0:
+            graph.set_e_repr(
+                    {'features': torch.stack(bond_feature_list),
+                     'source_features': torch.stack(bond_source_feature_list)}
+                    )
         graph_list.append(graph)
 
     return graph_list
