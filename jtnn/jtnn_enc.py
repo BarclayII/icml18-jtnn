@@ -146,11 +146,11 @@ def level_order(forest, roots):
 
 
 def enc_tree_msg(src, edge):
-    return {'r': src['r'], 'm': src['m']}
+    return {'m': src['m'], 'rm': src['r'] * src['m']}
 
 
 def enc_tree_reduce(node, msgs):
-    return {'s': msgs['m'].sum(1), 'rm': (msgs['r'] * msgs['m']).sum(1)}
+    return {'s': msgs['m'].sum(1), 'accum_rm': msgs['rm'].sum(1)}
 
 
 def enc_tree_gather_msg(src, edge):
@@ -158,7 +158,7 @@ def enc_tree_gather_msg(src, edge):
 
 
 def enc_tree_gather_reduce(node, msgs):
-    return msgs.sum(1)
+    return {'m': msgs.sum(1)}
 
 
 class EncoderGatherUpdate(nn.Module):
@@ -168,12 +168,10 @@ class EncoderGatherUpdate(nn.Module):
 
         self.W = nn.Linear(2 * hidden_size, hidden_size)
 
-    def forward(self, node, accum):
+    def forward(self, node):
         x = node['x']
-        m = accum if accum is not None else (
-                x.new(*x.shape[:-1], self.hidden_size).zero_())
+        m = node['m']
         return {
-            'm': m,
             'h': torch.relu(self.W(torch.cat([x, m], 1))),
         }
 
@@ -218,6 +216,7 @@ class DGLJTNNEncoder(nn.Module):
             'z': torch.zeros(n_edges, self.hidden_size),
             'src_x': torch.zeros(n_edges, self.hidden_size),
             'dst_x': torch.zeros(n_edges, self.hidden_size),
+            'accum_rm': torch.zeros(n_edges, self.hidden_size),
         })
 
         # Send the source/destination node features to edges
@@ -237,7 +236,7 @@ class DGLJTNNEncoder(nn.Module):
         # if m_ij is actually computed or not.
         for u, v in level_order(mol_tree_batch, root_ids):
             eid = mol_tree_batch.get_edge_id(u, v)
-            mol_tree_batch_lg.update_to(
+            mol_tree_batch_lg.pull(
                 eid,
                 enc_tree_msg,
                 enc_tree_reduce,

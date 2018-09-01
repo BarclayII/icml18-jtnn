@@ -9,8 +9,9 @@ from torch import nn
 import matplotlib.pyplot as plt
 from dgl import batch
 
+torch.manual_seed(1)
+
 smiles_batch = ['C1=CC=CC=C1C2=CC=CC=C2', 'C1=CC=CC=C1C(=O)O', 'Cc1ccccc1C(=O)C2CCCC2']
-#smiles_batch = ['C1=CC=CC=C1C(=O)O']
 
 def allclose(a, b):
     return torch.allclose(a, b, rtol=1e-4, atol=1e-7)
@@ -99,7 +100,7 @@ def test_treedec():
 
     emb = nn.Embedding(vocab.size(), 10)
     dgljtnn = DGLJTNNDecoder(vocab, 10, 10, emb)
-    dgl_p_loss, dgl_q_loss = dgljtnn(nx_mol_batch, tree_vec)
+    dgl_q_loss, dgl_p_loss, dgl_q_acc, dgl_p_acc = dgljtnn(nx_mol_batch, tree_vec)
 
     jtnn = JTNNDecoder(vocab, 10, 10, emb)
     jtnn.W = dgljtnn.W
@@ -110,10 +111,12 @@ def test_treedec():
     jtnn.W_r = dgljtnn.dec_tree_edge_update.W_r
     jtnn.U_r = dgljtnn.dec_tree_edge_update.U_r
     jtnn.W_h = dgljtnn.dec_tree_edge_update.W_h
-    q_loss, p_loss, _, _ = jtnn(mol_batch, tree_vec)
+    q_loss, p_loss, q_acc, p_acc = jtnn(mol_batch, tree_vec)
 
     assert isclose(p_loss, dgl_p_loss)
     assert isclose(q_loss, dgl_q_loss)
+    assert isclose(p_acc, dgl_p_acc)
+    assert isclose(q_acc, dgl_q_acc)
 
 
 if __name__ == '__main__':

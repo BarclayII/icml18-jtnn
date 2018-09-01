@@ -16,6 +16,10 @@ def onek_encoding_unk(x, allowable_set):
         x = allowable_set[-1]
     return [x == s for s in allowable_set]
 
+# Note that during graph decoding they don't predict stereochemistry-related
+# characteristics (i.e. Chiral Atoms, E-Z, Cis-Trans).  Instead, they decode
+# the 2-D graph first, then enumerate all possible 3-D forms and find the
+# one with highest score.
 def atom_features(atom):
     return torch.Tensor(onek_encoding_unk(atom.GetSymbol(), ELEM_LIST) 
             + onek_encoding_unk(atom.GetDegree(), [0,1,2,3,4,5]) 
@@ -136,3 +140,10 @@ class JTMPN(nn.Module):
         mol_vecs = torch.stack(mol_vecs, dim=0)
         return mol_vecs
 
+
+class DGLJTMPN(nn.Module):
+    def __init__(self, hidden_size, depth):
+        nn.Module.__init__(self)
+
+    def forward(self, cand_batch, tree_mess):
+        pass

@@ -353,23 +353,19 @@ def dec_tree_node_msg(src, edge):
 
 
 def dec_tree_node_reduce(node, msgs):
-    return msgs.sum(1)
+    return {'h': msgs.sum(1)}
 
 
-def dec_tree_node_update(node, accum):
-    n_nodes = node['x'].shape[0]
-    accum = accum if accum is not None else \
-            node['h'].clone().zero_()
-    new = node['h'].new(n_nodes).zero_().byte()
-    return {'h': accum, 'new': new}
+def dec_tree_node_update(node):
+    return {'new': node['new'].clone().zero_()}
 
 
 def dec_tree_edge_msg(src, edge):
-    return {'r': src['r'], 'm': src['m']}
+    return {'m': src['m'], 'rm': src['r'] * src['m']}
 
 
 def dec_tree_edge_reduce(node, msgs):
-    return {'s': msgs['m'].sum(1), 'rm': (msgs['r'] * msgs['m']).sum(1)}
+    return {'s': msgs['m'].sum(1), 'accum_rm': msgs['rm'].sum(1)}
 
 
 class DGLJTNNDecoder(nn.Module):
@@ -418,6 +414,7 @@ class DGLJTNNDecoder(nn.Module):
             'z': torch.zeros(n_edges, self.hidden_size),
             'src_x': torch.zeros(n_edges, self.hidden_size),
             'dst_x': torch.zeros(n_edges, self.hidden_size),
+            'accum_rm': torch.zeros(n_edges, self.hidden_size),
         })
 
         mol_tree_batch.update_edge(
@@ -435,7 +432,7 @@ class DGLJTNNDecoder(nn.Module):
         q_targets = []
 
         # Predict root
-        mol_tree_batch.update_to(
+        mol_tree_batch.pull(
             root_ids,
             dec_tree_node_msg,
             dec_tree_node_reduce,
@@ -458,7 +455,7 @@ class DGLJTNNDecoder(nn.Module):
             p_targets.append(torch.tensor([ip.get(_i, 0) for _i in t_set]))
             t_set = list(i)
             eid = mol_tree_batch.get_edge_id(u, v)
-            mol_tree_batch_lg.update_to(
+            mol_tree_batch_lg.pull(
                 eid,
                 dec_tree_edge_msg,
                 dec_tree_edge_reduce,
@@ -466,7 +463,7 @@ class DGLJTNNDecoder(nn.Module):
                 batchable=True,
             )
             is_new = mol_tree_batch.get_n_repr(v)['new']
-            mol_tree_batch.update_to(
+            mol_tree_batch.pull(
                 v,
                 dec_tree_node_msg,
                 dec_tree_node_reduce,
@@ -496,5 +493,12 @@ class DGLJTNNDecoder(nn.Module):
             p, p_targets.float(), size_average=False
         ) / n_trees
         q_loss = F.cross_entropy(q, q_targets, size_average=False) / n_trees
+        p_acc = ((p > 0).long() == p_targets).sum().float() / p_targets.shape[0]
+        q_acc = (q.max(1)[1] == q_targets).float().sum() / q_targets.shape[0]
 
-        return p_loss, q_loss
+        return q_loss, p_loss, q_acc, p_acc
+
+    def decode(self, mol_vec, prob_decode):
+        # Using non-batched DGL to decode since it involves simultaneous graph
+        # generation and message passing
+        pass

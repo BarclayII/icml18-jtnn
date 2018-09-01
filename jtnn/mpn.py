@@ -166,7 +166,7 @@ def mpn_loopy_bp_msg(src, edge):
 
 
 def mpn_loopy_bp_reduce(node, msgs):
-    return {'msg': torch.sum(msgs, 1)}
+    return {'accum_msg': torch.sum(msgs, 1)}
 
 
 class LoopyBPUpdate(nn.Module):
@@ -176,9 +176,9 @@ class LoopyBPUpdate(nn.Module):
 
         self.W_h = nn.Linear(hidden_size, hidden_size, bias=False)
 
-    def forward(self, node, accum):
+    def forward(self, node):
         msg_input = node['msg_input']
-        msg_delta = self.W_h(accum['msg']) if accum is not None else 0
+        msg_delta = self.W_h(node['accum_msg'])
         msg = F.relu(msg_input + msg_delta)
         return {'msg': msg}
 
@@ -189,7 +189,7 @@ def mpn_gather_msg(src, edge):
 
 
 def mpn_gather_reduce(node, msgs):
-    return {'msg': torch.sum(msgs, 1)}
+    return {'m': torch.sum(msgs, 1)}
 
 
 class GatherUpdate(nn.Module):
@@ -199,14 +199,10 @@ class GatherUpdate(nn.Module):
 
         self.W_o = nn.Linear(ATOM_FDIM + hidden_size, hidden_size)
 
-    def forward(self, node, accum):
-        m = (torch.zeros(*node['features'].shape[:-1], self.hidden_size)
-             .to(node['features'])
-             if accum is None
-             else accum['msg'])
+    def forward(self, node):
+        m = node['m']
         return {
             'h': F.relu(self.W_o(torch.cat([node['features'], m], 1))),
-            'm': m,
         }
 
 
@@ -225,14 +221,22 @@ class DGLMPN(nn.Module):
     def forward(self, mol_graph_list):
         mol_graph = batch(mol_graph_list)
         mol_line_graph = line_graph(mol_graph, no_backtracking=True)
+        n_nodes = len(mol_graph.nodes)
 
         bond_features = mol_line_graph.get_n_repr()['features']
         source_features = mol_line_graph.get_n_repr()['source_features']
 
         features = torch.cat([source_features, bond_features], 1)
         msg_input = self.W_i(features)
-        mol_line_graph.set_n_repr({'msg_input': msg_input})
-        mol_line_graph.set_n_repr({'msg': F.relu(msg_input)})
+        mol_line_graph.set_n_repr({
+            'msg_input': msg_input,
+            'msg': F.relu(msg_input),
+            'accum_msg': torch.zeros_like(msg_input),
+        })
+        mol_graph.set_n_repr({
+            'm': bond_features.new(n_nodes, self.hidden_size).zero_(),
+            'h': bond_features.new(n_nodes, self.hidden_size).zero_(),
+        })
 
         for i in range(self.depth - 1):
             mol_line_graph.update_all(mpn_loopy_bp_msg, mpn_loopy_bp_reduce, self.loopy_bp_updater, True)
