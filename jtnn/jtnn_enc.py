@@ -252,9 +252,6 @@ class DGLJTNNEncoder(nn.Module):
             batchable=True,
         )
 
-        tree_mess = {}
-        for u, v in edge_list:
-            tree_mess[(u, v)] = mol_tree_batch.get_e_repr(u, v)['m']
         root_vecs = mol_tree_batch.get_n_repr(root_ids)['h']
 
-        return tree_mess, root_vecs
+        return mol_tree_batch, root_vecs
