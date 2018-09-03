@@ -90,6 +90,7 @@ class JTMPN(nn.Module):
                 fbonds.append( torch.cat([fatoms[y], bfeature], 0) )
                 in_bonds[x].append(b)
 
+                # FIXME: https://github.com/wengong-jin/icml18-jtnn/issues/19
                 if x_bid >= 0 and y_bid >= 0 and x_bid != y_bid:
                     if (x_bid,y_bid) in mess_dict:
                         mess_idx = mess_dict[(x_bid,y_bid)]
