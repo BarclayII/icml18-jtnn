@@ -2,7 +2,26 @@
 
 <img src="https://github.com/wengong-jin/icml18-jtnn/blob/master/paradigm.png" width="400">
 
-Implementation of our Junction Tree Variational Autoencoder [https://arxiv.org/abs/1802.04364](https://arxiv.org/abs/1802.04364)
+Implementation of Junction Tree Variational Autoencoder from Jin et al. [https://arxiv.org/abs/1802.04364](https://arxiv.org/abs/1802.04364)
+
+This is a fork to port the model onto Python 3 and some library.
+
+Currently only VAE training is ported.
+
+You need to initialize the submodule by the following:
+
+```
+git submodule init
+git submodule update
+```
+
+# Checklist
+
+- [x] VAE training
+  * Run `PYTHONPATH=$PWD/_dgl/python:$PWD:$PYTHONPATH python3 molvae/vaetrain.py -t data/train.txt -v data/vocab.txt -s . -b 10`
+  * Or `PYTHONPATH=$PWD/_dgl/python:$PWD:$PYTHONPATH python3 molvae/vaetrain_dgl.py -t data/train.txt -v data/vocab.txt -s . -b 10`
+- [ ] VAE decoding during inference
+- [ ] Property prediction
 
 # Requirements
 * Linux (We only tested on Ubuntu)
@@ -22,4 +41,4 @@ This repository contains the following directories:
 * `jtnn/` contains codes for model formulation.
 
 # Contact
-Wengong Jin (wengong@csail.mit.edu)
+Quan (Andy) Gan (qg323@nyu.edu)

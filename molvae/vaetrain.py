@@ -37,7 +37,6 @@ latent_size = int(opts.latent_size)
 depth = int(opts.depth)
 beta = float(opts.beta)
 lr = float(opts.lr)
-anneal = float(opts.anneal)
 
 model = JTNNVAE(vocab, hidden_size, latent_size, depth)
 
@@ -50,7 +49,7 @@ else:
         else:
             nn.init.xavier_normal(param)
 
-model = model.cuda()
+#model = model.cuda()
 print("Model #Params: %dK" % (sum([x.nelement() for x in model.parameters()]) / 1000,))
 
 optimizer = optim.Adam(model.parameters(), lr=lr)
@@ -63,7 +62,7 @@ MAX_EPOCH = 7
 PRINT_ITER = 20
 
 for epoch in range(MAX_EPOCH):
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=lambda x:x, drop_last=True)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=lambda x:x, drop_last=True)
 
     word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
 

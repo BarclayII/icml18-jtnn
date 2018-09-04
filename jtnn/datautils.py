@@ -18,11 +18,11 @@ class MoleculeDataset(Dataset):
         mol_tree.assemble()
         return mol_tree
 
-class NXMoleculeDataset(MoleculeDataset):
+class DGLMoleculeDataset(MoleculeDataset):
     def __getitem__(self, idx):
-        from .mol_tree_nx import NXMolTree
+        from .mol_tree_nx import DGLMolTree
         smiles = self.data[idx]
-        mol_tree = NXMolTree(smiles)
+        mol_tree = DGLMolTree(smiles)
         mol_tree.recover()
         mol_tree.assemble()
         return mol_tree
@@ -45,11 +45,11 @@ class PropDataset(Dataset):
         mol_tree.assemble()
         return mol_tree, self.prop_data[idx]
 
-class NXPropDataset(PropDataset):
+class DGLPropDataset(PropDataset):
     def __getitem__(self, idx):
-        from .mol_tree_nx import NXMolTree
+        from .mol_tree_nx import DGLMolTree
         smiles = self.data[idx]
-        mol_tree = NXMolTree(smiles)
+        mol_tree = DGLMolTree(smiles)
         mol_tree.recover()
         mol_tree.assemble()
         return mol_tree, self.prop_data[idx]

@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from .mol_tree import Vocab, MolTree
 from .nnutils import create_var
-from .jtnn_enc import JTNNEncoder
-from .jtnn_dec import JTNNDecoder
+from .jtnn_enc import JTNNEncoder, DGLJTNNEncoder
+from .jtnn_dec import JTNNDecoder, DGLJTNNDecoder
 from .mpn import MPN, mol2graph, DGLMPN, mol2dgl
-from .jtmpn import JTMPN
+from .jtmpn import JTMPN, DGLJTMPN
 
 from .chemutils import enum_assemble, set_atommap, copy_edit_mol, attach_mols, atom_equal, decode_stereo
 import rdkit
@@ -158,7 +159,7 @@ class JTNNVAE(nn.Module):
             labels.append( (cands.index(mol_tree.smiles3D), len(cands)) )
 
         if len(labels) == 0: 
-            return create_var(torch.Tensor(0)), 1.0
+            return create_var(torch.tensor(0.)), 1.0
 
         batch_idx = create_var(torch.LongTensor(batch_idx))
         stereo_cands = self.mpn(mol2graph(stereo_cands))
@@ -345,6 +346,8 @@ class DGLJTNNVAE(nn.Module):
         self.G_var = nn.Linear(hidden_size, latent_size // 2)
 
     def encode(self, mol_batch):
+        dgl_set_batch_nodeID(mol_batch, self.vocab)
+
         smiles_batch = [mol_tree.smiles for mol_tree in mol_batch]
         mol_vec = self.mpn(mol2dgl(smiles_batch))
         # mol_batch is a junction tree
@@ -372,7 +375,7 @@ class DGLJTNNVAE(nn.Module):
         mol_vec = mol_mean + torch.exp(mol_log_var // 2) * epsilon
 
         word_loss, topo_loss, word_acc, topo_acc = self.decoder(mol_batch, tree_vec)
-        assm_loss, asm_acc = self.assm(mol_batch, mol_tree_batch, mol_vec)
+        assm_loss, assm_acc = self.assm(mol_batch, mol_tree_batch, mol_vec)
         stereo_loss, stereo_acc = self.stereo(mol_batch, mol_vec)
 
         all_vec = torch.cat([tree_vec, mol_vec], dim=1)
@@ -408,7 +411,8 @@ class DGLJTNNVAE(nn.Module):
                           if len(node['cands']) > 1 and not node['is_leaf']]
             cnt += len(comp_nodes)
             # segmented accuracy and cross entropy
-            for node in comp_nodes:
+            for node_id in comp_nodes:
+                node = mol_tree.nodes[node_id]
                 label = node['cands'].index(node['label'])
                 ncand = len(node['cands'])
                 cur_score = scores[tot:tot+ncand]
@@ -439,10 +443,10 @@ class DGLJTNNVAE(nn.Module):
 
         if len(labels) == 0:
             # Only one stereoisomer exists; do nothing
-            return torch.tensor(0), 1.
+            return torch.tensor(0.), 1.
 
         batch_idx = torch.LongTensor(batch_idx)
-        stereo_cands = self.mpn(mol2graph(stereo_cands))
+        stereo_cands = self.mpn(mol2dgl(stereo_cands))
         stereo_cands = self.G_mean(stereo_cands)
         stereo_labels = mol_vec[batch_idx]
         scores = F.cosine_similarity(stereo_cands, stereo_labels)
@@ -453,7 +457,7 @@ class DGLJTNNVAE(nn.Module):
             cur_scores = scores[st:st+le]
             if cur_scores.data[label].item() >= cur_scores.max().item():
                 acc += 1
-            label = torch.LongTensor(label)
+            label = torch.LongTensor([label])
             all_loss.append(
                 F.cross_entropy(cur_scores.view(1, -1), label, size_average=False))
             st += le

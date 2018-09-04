@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from .nnutils import create_var, index_select_ND
+from .nnutils import create_var, index_select_ND, cuda
 from .chemutils import get_mol
 #from mpn import atom_features, bond_features, ATOM_FDIM, BOND_FDIM
 import rdkit.Chem as Chem
@@ -31,12 +31,6 @@ def bond_features(bond):
     bt = bond.GetBondType()
     return torch.Tensor([bt == Chem.rdchem.BondType.SINGLE, bt == Chem.rdchem.BondType.DOUBLE, bt == Chem.rdchem.BondType.TRIPLE, bt == Chem.rdchem.BondType.AROMATIC, bond.IsInRing()])
 
-graph_messages = []
-nei_messages = []
-alpha_tree_edges = []
-alpha_graph_edges = []
-tree_messages = []
-all_bonds_list = []
 
 class JTMPN(nn.Module):
 
@@ -94,21 +88,14 @@ class JTMPN(nn.Module):
                 if x_bid >= 0 and y_bid >= 0 and x_bid != y_bid:
                     if (x_bid,y_bid) in mess_dict:
                         mess_idx = mess_dict[(x_bid,y_bid)]
-                        alpha_tree_edges.append((x_bid, y_bid))
-                        alpha_graph_edges.append((x, y))
                         in_bonds[y].append(mess_idx)
-                        tree_messages.append(all_mess[mess_idx])
                     if (y_bid,x_bid) in mess_dict:
                         mess_idx = mess_dict[(y_bid,x_bid)]
-                        alpha_tree_edges.append((y_bid, x_bid))
-                        alpha_graph_edges.append((y, x))
                         in_bonds[x].append(mess_idx)
-                        tree_messages.append(all_mess[mess_idx])
             
             scope.append((total_atoms,n_atoms))
             total_atoms += n_atoms
         
-        all_bonds_list.append(all_bonds)
         total_bonds = len(all_bonds)
         total_mess = len(all_mess)
         fatoms = torch.stack(fatoms, 0)
@@ -134,16 +121,13 @@ class JTMPN(nn.Module):
 
         binput = self.W_i(fbonds)
         graph_message = nn.ReLU()(binput)
-        graph_messages.append(graph_message)
 
         for i in range(self.depth - 1):
             message = torch.cat([tree_message,graph_message], dim=0)
             nei_message = index_select_ND(message, 0, bgraph)
-            nei_messages.append(nei_message)
             nei_message = nei_message.sum(dim=1)
             nei_message = self.W_h(nei_message)
             graph_message = nn.ReLU()(binput + nei_message)
-            graph_messages.append(graph_message)
 
         message = torch.cat([tree_message,graph_message], dim=0)
         nei_message = index_select_ND(message, 0, agraph)

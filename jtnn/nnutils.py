@@ -8,6 +8,12 @@ def create_var(tensor, requires_grad=None):
     else:
         return Variable(tensor, requires_grad=requires_grad)
 
+def cuda(tensor):
+    if torch.cuda.is_available():
+        return tensor.cuda()
+    else:
+        return tensor
+
 def index_select_ND(source, dim, index):
     index_size = index.size()
     suffix_dim = source.size()[1:]
