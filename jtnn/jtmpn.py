@@ -5,6 +5,7 @@ from .chemutils import get_mol
 #from mpn import atom_features, bond_features, ATOM_FDIM, BOND_FDIM
 import rdkit.Chem as Chem
 from dgl import DGLGraph, line_graph, batch, unbatch
+from .profile import profile
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
 
@@ -43,6 +44,7 @@ class JTMPN(nn.Module):
         self.W_h = nn.Linear(hidden_size, hidden_size, bias=False)
         self.W_o = nn.Linear(ATOM_FDIM + hidden_size, hidden_size)
 
+    @profile
     def forward(self, cand_batch, tree_mess):
         fatoms,fbonds = [],[] 
         in_bonds,all_bonds = [],[] 
@@ -143,7 +145,7 @@ class JTMPN(nn.Module):
         mol_vecs = torch.stack(mol_vecs, dim=0)
         return mol_vecs
 
-
+@profile
 def mol2dgl(cand_batch, mol_tree_batch):
     cand_graphs = []
     tree_mess_source_edges = [] # map these edges from trees to...
@@ -260,6 +262,7 @@ class DGLJTMPN(nn.Module):
         self.gather_updater = GatherUpdate(hidden_size)
         self.hidden_size = hidden_size
 
+    @profile
     def forward(self, cand_batch, mol_tree_batch):
         cand_graphs, tree_mess_src_edges, tree_mess_tgt_edges = \
                 mol2dgl(cand_batch, mol_tree_batch)

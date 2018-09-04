@@ -6,6 +6,7 @@ from .nnutils import create_var, GRU, GRUUpdate
 import itertools
 import networkx as nx
 from dgl import batch, unbatch, line_graph
+from .profile import profile
 
 MAX_NB = 8
 
@@ -28,6 +29,7 @@ class JTNNEncoder(nn.Module):
         self.W_h = nn.Linear(2 * hidden_size, hidden_size)
         self.W = nn.Linear(2 * hidden_size, hidden_size)
 
+    @profile
     def forward(self, root_batch):
         orders = []
         for root in root_batch:
@@ -191,6 +193,7 @@ class DGLJTNNEncoder(nn.Module):
         self.enc_tree_update = GRUUpdate(hidden_size)
         self.enc_tree_gather_update = EncoderGatherUpdate(hidden_size)
 
+    @profile
     def forward(self, mol_trees):
         mol_tree_batch = batch(mol_trees)
         # Since tree roots are designated to 0.  In the batched graph we can

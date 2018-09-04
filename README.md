@@ -22,6 +22,10 @@ git submodule update
   * Or `PYTHONPATH=$PWD/_dgl/python:$PWD:$PYTHONPATH python3 molvae/vaetrain_dgl.py -t data/train.txt -v data/vocab.txt -s . -b 10`
 - [ ] VAE decoding during inference
 - [ ] Property prediction
+- [ ] CUDA support
+- [x] Profiling
+  * To enable profiling, set the environment variable `PROFILE` to 1, and set `PROFILE_OUTPUT` to the destination of line profiler
+    dump (leave it blank for standard output)
 
 # Requirements
 * Linux (We only tested on Ubuntu)

@@ -7,6 +7,7 @@ from .chemutils import get_mol
 from networkx import Graph, DiGraph, line_graph, convert_node_labels_to_integers
 from dgl import DGLGraph, line_graph, batch, unbatch
 from functools import partial
+from .profile import profile
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
 
@@ -33,6 +34,7 @@ def bond_features(bond):
     fstereo = onek_encoding_unk(stereo, [0,1,2,3,4,5])
     return torch.Tensor(fbond + fstereo)
 
+@profile
 def mol2graph(mol_batch):
     padding = torch.zeros(ATOM_FDIM + BOND_FDIM)
     fatoms,fbonds = [],[padding] #Ensure bond is 1-indexed
@@ -85,6 +87,7 @@ def mol2graph(mol_batch):
 
     return fatoms, fbonds, agraph, bgraph, scope
 
+@profile
 def mol2dgl(smiles_batch):
     n_nodes = 0
     graph_list = []
@@ -131,6 +134,7 @@ class MPN(nn.Module):
         self.W_h = nn.Linear(hidden_size, hidden_size, bias=False)
         self.W_o = nn.Linear(ATOM_FDIM + hidden_size, hidden_size)
 
+    @profile
     def forward(self, mol_graph):
         fatoms,fbonds,agraph,bgraph,scope = mol_graph
         fatoms = create_var(fatoms)
@@ -218,6 +222,7 @@ class DGLMPN(nn.Module):
         self.gather_updater = GatherUpdate(hidden_size)
         self.hidden_size = hidden_size
 
+    @profile
     def forward(self, mol_graph_list):
         mol_graph = batch(mol_graph_list)
         mol_line_graph = line_graph(mol_graph, no_backtracking=True)

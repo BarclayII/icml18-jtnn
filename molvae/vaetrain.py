@@ -58,47 +58,51 @@ scheduler.step()
 
 dataset = MoleculeDataset(opts.train_path)
 
-MAX_EPOCH = 7
-PRINT_ITER = 20
+@profile
+def train():
+    MAX_EPOCH = 7
+    PRINT_ITER = 20
 
-for epoch in range(MAX_EPOCH):
-    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=lambda x:x, drop_last=True)
+    for epoch in range(MAX_EPOCH):
+        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=lambda x:x, drop_last=True)
 
-    word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
+        word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
 
-    for it, batch in enumerate(dataloader):
-        for mol_tree in batch:
-            for node in mol_tree.nodes:
-                if node.label not in node.cands:
-                    node.cands.append(node.label)
-                    node.cand_mols.append(node.label_mol)
+        for it, batch in enumerate(dataloader):
+            for mol_tree in batch:
+                for node in mol_tree.nodes:
+                    if node.label not in node.cands:
+                        node.cands.append(node.label)
+                        node.cand_mols.append(node.label_mol)
 
-        model.zero_grad()
-        loss, kl_div, wacc, tacc, sacc, dacc = model(batch, beta)
-        loss.backward()
-        optimizer.step()
+            model.zero_grad()
+            loss, kl_div, wacc, tacc, sacc, dacc = model(batch, beta)
+            loss.backward()
+            optimizer.step()
 
-        word_acc += wacc
-        topo_acc += tacc
-        assm_acc += sacc
-        steo_acc += dacc
+            word_acc += wacc
+            topo_acc += tacc
+            assm_acc += sacc
+            steo_acc += dacc
 
-        if (it + 1) % PRINT_ITER == 0:
-            word_acc = word_acc / PRINT_ITER * 100
-            topo_acc = topo_acc / PRINT_ITER * 100
-            assm_acc = assm_acc / PRINT_ITER * 100
-            steo_acc = steo_acc / PRINT_ITER * 100
+            if (it + 1) % PRINT_ITER == 0:
+                word_acc = word_acc / PRINT_ITER * 100
+                topo_acc = topo_acc / PRINT_ITER * 100
+                assm_acc = assm_acc / PRINT_ITER * 100
+                steo_acc = steo_acc / PRINT_ITER * 100
 
-            print("KL: %.1f, Word: %.2f, Topo: %.2f, Assm: %.2f, Steo: %.2f" % (kl_div, word_acc, topo_acc, assm_acc, steo_acc))
-            word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
-            sys.stdout.flush()
+                print("KL: %.1f, Word: %.2f, Topo: %.2f, Assm: %.2f, Steo: %.2f" % (kl_div, word_acc, topo_acc, assm_acc, steo_acc))
+                word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
+                sys.stdout.flush()
 
-        if (it + 1) % 1500 == 0: #Fast annealing
-            scheduler.step()
-            print("learning rate: %.6f" % scheduler.get_lr()[0])
-            torch.save(model.state_dict(), opts.save_path + "/model.iter-%d-%d" % (epoch, it + 1))
+            if (it + 1) % 1500 == 0: #Fast annealing
+                scheduler.step()
+                print("learning rate: %.6f" % scheduler.get_lr()[0])
+                torch.save(model.state_dict(), opts.save_path + "/model.iter-%d-%d" % (epoch, it + 1))
 
-    scheduler.step()
-    print("learning rate: %.6f" % scheduler.get_lr()[0])
-    torch.save(model.state_dict(), opts.save_path + "/model.iter-" + str(epoch))
+        scheduler.step()
+        print("learning rate: %.6f" % scheduler.get_lr()[0])
+        torch.save(model.state_dict(), opts.save_path + "/model.iter-" + str(epoch))
 
+if __name__ == '__main__':
+    train()

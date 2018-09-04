@@ -7,6 +7,7 @@ from .jtnn_enc import JTNNEncoder, DGLJTNNEncoder
 from .jtnn_dec import JTNNDecoder, DGLJTNNDecoder
 from .mpn import MPN, mol2graph, DGLMPN, mol2dgl
 from .jtmpn import JTMPN, DGLJTMPN
+from .profile import profile
 
 from .chemutils import enum_assemble, set_atommap, copy_edit_mol, attach_mols, atom_equal, decode_stereo
 import rdkit
@@ -58,6 +59,7 @@ class JTNNVAE(nn.Module):
         self.assm_loss = nn.CrossEntropyLoss(size_average=False)
         self.stereo_loss = nn.CrossEntropyLoss(size_average=False)
     
+    @profile
     def encode(self, mol_batch):
         set_batch_nodeID(mol_batch, self.vocab)
         root_batch = [mol_tree.nodes[0] for mol_tree in mol_batch]
@@ -77,6 +79,7 @@ class JTNNVAE(nn.Module):
         mol_mean = self.G_mean(mol_vec)
         return torch.cat([tree_mean,mol_mean], dim=1)
 
+    @profile
     def forward(self, mol_batch, beta=0):
         batch_size = len(mol_batch)
 
@@ -105,6 +108,7 @@ class JTNNVAE(nn.Module):
 
         return loss, kl_loss.data[0], word_acc, topo_acc, assm_acc, stereo_acc
 
+    @profile
     def assm(self, mol_batch, mol_vec, tree_mess):
         cands = []
         batch_idx = []
@@ -146,6 +150,7 @@ class JTNNVAE(nn.Module):
         all_loss = sum(all_loss) / len(mol_batch)
         return all_loss, acc * 1.0 / cnt
 
+    @profile
     def stereo(self, mol_batch, mol_vec):
         stereo_cands,batch_idx = [],[]
         labels = []
@@ -345,6 +350,7 @@ class DGLJTNNVAE(nn.Module):
         self.G_mean = nn.Linear(hidden_size, latent_size // 2)
         self.G_var = nn.Linear(hidden_size, latent_size // 2)
 
+    @profile
     def encode(self, mol_batch):
         dgl_set_batch_nodeID(mol_batch, self.vocab)
 
@@ -355,6 +361,7 @@ class DGLJTNNVAE(nn.Module):
 
         return mol_tree_batch, tree_vec, mol_vec
 
+    @profile
     def forward(self, mol_batch, beta=0):
         batch_size = len(mol_batch)
 
@@ -383,6 +390,7 @@ class DGLJTNNVAE(nn.Module):
 
         return loss, kl_loss.item(), word_acc, topo_acc, assm_acc, stereo_acc
 
+    @profile
     def assm(self, mol_batch, mol_tree_batch, mol_vec):
         cands = []
         batch_idx = []
@@ -428,6 +436,7 @@ class DGLJTNNVAE(nn.Module):
         all_loss = sum(all_loss) / len(all_loss)
         return all_loss, acc / cnt
 
+    @profile
     def stereo(self, mol_batch, mol_vec):
         stereo_cands, batch_idx = [], []
         labels = []

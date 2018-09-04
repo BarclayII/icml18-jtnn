@@ -8,6 +8,7 @@ import copy
 import itertools
 from dgl import batch, line_graph
 import networkx as nx
+from .profile import profile
 
 MAX_NB = 8
 MAX_DECODE_LEN = 100
@@ -50,6 +51,7 @@ class JTNNDecoder(nn.Module):
         dfs(trace, node, super_root)
         return [(x.smiles, y.smiles, z) for x,y,z in trace]
        
+    @profile
     def forward(self, mol_batch, mol_vec):
         super_root = MolTreeNode("")
         super_root.idx = -1
@@ -388,6 +390,7 @@ class DGLJTNNDecoder(nn.Module):
         self.W_o = nn.Linear(hidden_size, self.vocab_size)
         self.U_s = nn.Linear(hidden_size, 1)
 
+    @profile
     def forward(self, mol_trees, tree_vec):
         '''
         The training procedure which computes the prediction loss given the
