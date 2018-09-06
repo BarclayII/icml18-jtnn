@@ -90,39 +90,21 @@ class JTNNVAE(nn.Module):
         mol_mean = self.G_mean(mol_vec)
         mol_log_var = -torch.abs(self.G_var(mol_vec)) #Following Mueller et al.
 
-        self.tree_mean = tree_mean
-        self.tree_log_var = tree_log_var
-        self.mol_mean = mol_mean
-        self.mol_log_var = mol_log_var
-
         z_mean = torch.cat([tree_mean,mol_mean], dim=1)
         z_log_var = torch.cat([tree_log_var,mol_log_var], dim=1)
         kl_loss = -0.5 * torch.sum(1.0 + z_log_var - z_mean * z_mean - torch.exp(z_log_var)) / batch_size
-
-        self.z_mean = z_mean
-        self.z_log_var = z_log_var
 
         epsilon = create_var(torch.randn(batch_size, self.latent_size // 2), False) if e1 is None else e1
         tree_vec = tree_mean + torch.exp(tree_log_var // 2) * epsilon
         epsilon = create_var(torch.randn(batch_size, self.latent_size // 2), False) if e2 is None else e2
         mol_vec = mol_mean + torch.exp(mol_log_var // 2) * epsilon
-
-        self.tree_vec = tree_vec
-        self.mol_vec = mol_vec
         
         word_loss, topo_loss, word_acc, topo_acc = self.decoder(mol_batch, tree_vec)
         assm_loss, assm_acc = self.assm(mol_batch, mol_vec, tree_mess)
         stereo_loss, stereo_acc = self.stereo(mol_batch, mol_vec)
 
-        self.word_loss_v = word_loss
-        self.topo_loss_v = topo_loss
-        self.assm_loss_v = assm_loss
-        self.stereo_loss_v = stereo_loss
-
         all_vec = torch.cat([tree_vec, mol_vec], dim=1)
         loss = word_loss + topo_loss + assm_loss + 2 * stereo_loss + beta * kl_loss 
-
-        self.all_vec = all_vec
 
         return loss, kl_loss.data[0], word_acc, topo_acc, assm_acc, stereo_acc
 
@@ -165,7 +147,7 @@ class JTNNVAE(nn.Module):
                 all_loss.append( self.assm_loss(cur_score.view(1,-1), label) )
         
         #all_loss = torch.stack(all_loss).sum() / len(mol_batch)
-        all_loss = sum(all_loss) / len(all_loss)
+        all_loss = sum(all_loss) / len(mol_batch)
         return all_loss, acc * 1.0 / cnt
 
     @profile
@@ -469,7 +451,7 @@ class DGLJTNNVAE(nn.Module):
                 all_loss.append(
                     F.cross_entropy(cur_score.view(1, -1), label, size_average=False))
 
-        all_loss = sum(all_loss) / len(all_loss)
+        all_loss = sum(all_loss) / len(mol_batch)
         return all_loss, acc / cnt
 
     @profile
