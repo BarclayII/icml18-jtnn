@@ -7,21 +7,23 @@ from jtnn.mol_tree_nx import DGLMolTree
 from jtnn.jtnn_vae import set_batch_nodeID, dgl_set_batch_nodeID
 import torch
 from torch import nn
-import matplotlib.pyplot as plt
 from dgl import batch
 from rdkit import Chem
 
 torch.manual_seed(1)
 
+#smiles_batch = '''
+#CCCCCCC1=NN2C(=N)/C(=C\c3cc(C)n(-c4ccc(C)cc4C)c3C)C(=O)N=C2S1
+#COCC[C@@H](C)C(=O)N(C)Cc1ccc(O)cc1
+#C=CCn1c(S[C@H](C)c2nc3sc(C)c(C)c3c(=O)[nH]2)nnc1C1CC1
+#C[NH+](C/C=C/c1ccco1)CCC(F)(F)F
+#COc1ccc(N2C(=O)C(=O)N(CN3CCC(c4nc5ccccc5s4)CC3)C2=O)cc1
+#Cc1ccc([C@@H](C)[NH2+][C@H](C)C(=O)Nc2ccccc2F)cc1
+#O=c1cc(C[NH2+]Cc2cccc(Cl)c2)nc(N2CCCC2)[nH]1
+#O=C(Cn1nc(C(=O)[O-])c2ccccc2c1=O)Nc1ccc2c(c1)C(=O)c1ccccc1C2=O
+#'''.strip().split()
 smiles_batch = '''
 CCCCCCC1=NN2C(=N)/C(=C\c3cc(C)n(-c4ccc(C)cc4C)c3C)C(=O)N=C2S1
-COCC[C@@H](C)C(=O)N(C)Cc1ccc(O)cc1
-C=CCn1c(S[C@H](C)c2nc3sc(C)c(C)c3c(=O)[nH]2)nnc1C1CC1
-C[NH+](C/C=C/c1ccco1)CCC(F)(F)F
-COc1ccc(N2C(=O)C(=O)N(CN3CCC(c4nc5ccccc5s4)CC3)C2=O)cc1
-Cc1ccc([C@@H](C)[NH2+][C@H](C)C(=O)Nc2ccccc2F)cc1
-O=c1cc(C[NH2+]Cc2cccc(Cl)c2)nc(N2CCCC2)[nH]1
-O=C(Cn1nc(C(=O)[O-])c2ccccc2c1=O)Nc1ccc2c(c1)C(=O)c1ccccc1C2=O
 '''.strip().split()
 
 def allclose(a, b):
@@ -123,7 +125,7 @@ def test_treeenc():
     dgl_cand_vec = dgljtmpn(dglcands, mol_tree_batch)
 
     # TODO: add check.  Seems that the original implementation has a bug
-    #assert torch.allclose(cand_vec, dgl_cand_vec)
+    assert allclose(cand_vec, dgl_cand_vec)
 
 
 def test_treedec():

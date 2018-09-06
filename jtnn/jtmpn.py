@@ -13,6 +13,8 @@ ATOM_FDIM = len(ELEM_LIST) + 6 + 5 + 1
 BOND_FDIM = 5 
 MAX_NB = 10
 
+PAPER = False
+
 def onek_encoding_unk(x, allowable_set):
     if x not in allowable_set:
         x = allowable_set[-1]
@@ -121,6 +123,11 @@ class JTMPN(nn.Module):
         agraph = create_var(agraph)
         bgraph = create_var(bgraph)
 
+        self.fatoms = fatoms
+        self.fbonds = fbonds
+        self.agraph = agraph
+        self.bgraph = bgraph
+
         binput = self.W_i(fbonds)
         graph_message = nn.ReLU()(binput)
 
@@ -134,6 +141,7 @@ class JTMPN(nn.Module):
         message = torch.cat([tree_message,graph_message], dim=0)
         nei_message = index_select_ND(message, 0, agraph)
         nei_message = nei_message.sum(dim=1)
+        self.nei_message = nei_message
         ainput = torch.cat([fatoms, nei_message], dim=1)
         atom_hiddens = nn.ReLU()(self.W_o(ainput))
         
@@ -150,6 +158,7 @@ def mol2dgl(cand_batch, mol_tree_batch):
     cand_graphs = []
     tree_mess_source_edges = [] # map these edges from trees to...
     tree_mess_target_edges = [] # these edges on candidate graphs
+    tree_mess_target_nodes = []
     n_nodes = 0
 
     for mol, mol_tree, ctr_node_id in cand_batch:
@@ -184,10 +193,12 @@ def mol2dgl(cand_batch, mol_tree_batch):
                     tree_mess_target_edges.append(
                             (begin_idx + n_nodes, end_idx + n_nodes))
                     tree_mess_source_edges.append((x_bid, y_bid))
+                    tree_mess_target_nodes.append(end_idx + n_nodes)
                 if (y_bid, x_bid) in mol_tree_batch.edge_list:
                     tree_mess_target_edges.append(
                             (end_idx + n_nodes, begin_idx + n_nodes))
                     tree_mess_source_edges.append((y_bid, x_bid))
+                    tree_mess_target_nodes.append(begin_idx + n_nodes)
 
         n_nodes += len(g.nodes)
 
@@ -201,7 +212,8 @@ def mol2dgl(cand_batch, mol_tree_batch):
             })
         cand_graphs.append(g)
 
-    return cand_graphs, tree_mess_source_edges, tree_mess_target_edges
+    return cand_graphs, tree_mess_source_edges, tree_mess_target_edges, \
+           tree_mess_target_nodes
 
 
 # TODO: use SPMV
@@ -229,11 +241,17 @@ class LoopyBPUpdate(nn.Module):
 
 # TODO: can we use SPMV?
 def mpn_gather_msg(src, edge):
-    return edge['msg']
+    if PAPER:
+        return {'msg': edge['msg'], 'alpha': edge['alpha']}
+    else:
+        return {'msg': edge['msg']}
 
 
 def mpn_gather_reduce(node, msgs):
-    return {'m': torch.sum(msgs, 1)}
+    if PAPER:
+        return {'m': torch.sum(msgs['msg'], 1) + torch.sum(msgs['alpha'], 1)}
+    else:
+        return {'m': torch.sum(msgs['msg'], 1)}
 
 
 class GatherUpdate(nn.Module):
@@ -244,7 +262,10 @@ class GatherUpdate(nn.Module):
         self.W_o = nn.Linear(ATOM_FDIM + hidden_size, hidden_size)
 
     def forward(self, node):
-        m = node['m']
+        if PAPER:
+            m = node['m']
+        else:
+            m = node['m'] + node['alpha']
         return {
             'h': torch.relu(self.W_o(torch.cat([node['x'], m], 1))),
         }
@@ -264,18 +285,11 @@ class DGLJTMPN(nn.Module):
 
     @profile
     def forward(self, cand_batch, mol_tree_batch):
-        cand_graphs, tree_mess_src_edges, tree_mess_tgt_edges = \
+        cand_graphs, tree_mess_src_edges, tree_mess_tgt_edges, tree_mess_tgt_nodes = \
                 mol2dgl(cand_batch, mol_tree_batch)
 
         cand_graphs = batch(cand_graphs)
         n_nodes = len(cand_graphs.nodes)
-        # TODO: context
-        cand_graphs.set_e_repr({
-            'alpha': torch.zeros(len(cand_graphs.edge_list), self.hidden_size)
-        })
-
-        alpha = mol_tree_batch.get_e_repr(*zip(*tree_mess_src_edges))['m']
-        cand_graphs.set_e_repr({'alpha': alpha}, *zip(*tree_mess_tgt_edges))
 
         cand_graphs.update_edge(
             *zip(*cand_graphs.edge_list),
@@ -294,10 +308,32 @@ class DGLJTMPN(nn.Module):
             'msg': torch.relu(msg_input),
             'accum_msg': torch.zeros_like(msg_input),
         })
+        zero_node_state = bond_features.new(n_nodes, self.hidden_size).zero_()
         cand_graphs.set_n_repr({
-            'm': bond_features.new(n_nodes, self.hidden_size).zero_(),
-            'h': bond_features.new(n_nodes, self.hidden_size).zero_(),
+            'm': zero_node_state.clone(),
+            'h': zero_node_state.clone(),
         })
+
+        # TODO: context
+        if PAPER:
+            cand_graphs.set_e_repr({
+                'alpha': torch.zeros(len(cand_graphs.edge_list), self.hidden_size)
+            })
+
+            alpha = mol_tree_batch.get_e_repr(*zip(*tree_mess_src_edges))['m']
+            cand_graphs.set_e_repr({'alpha': alpha}, *zip(*tree_mess_tgt_edges))
+        else:
+            alpha = mol_tree_batch.get_e_repr(*zip(*tree_mess_src_edges))['m']
+            node_idx = (torch.LongTensor(tree_mess_tgt_nodes)
+                        .to(device=zero_node_state.device)[:, None]
+                        .expand_as(alpha))
+            node_alpha = zero_node_state.clone().scatter_add(0, node_idx, alpha)
+            cand_graphs.set_n_repr({'alpha': node_alpha})
+            cand_graphs.update_edge(
+                *zip(*cand_graphs.edge_list),
+                lambda src, dst, edge: {'alpha': src['alpha']},
+                batchable=True,
+            )
 
         for i in range(self.depth - 1):
             cand_line_graph.update_all(
