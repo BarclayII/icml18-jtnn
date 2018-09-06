@@ -4,11 +4,12 @@ from jtnn.jtnn_dec import JTNNDecoder, DGLJTNNDecoder
 from jtnn.jtmpn import JTMPN, DGLJTMPN
 from jtnn.mol_tree import MolTree, Vocab
 from jtnn.mol_tree_nx import DGLMolTree
-from jtnn.jtnn_vae import set_batch_nodeID, dgl_set_batch_nodeID
+from jtnn.jtnn_vae import set_batch_nodeID, dgl_set_batch_nodeID, JTNNVAE, DGLJTNNVAE
 import torch
 from torch import nn
 from dgl import batch
 from rdkit import Chem
+import numpy as np
 
 torch.manual_seed(1)
 
@@ -167,7 +168,67 @@ def test_treedec():
     assert isclose(q_acc, dgl_q_acc)
 
 
+def test_vae():
+    vocab = [x.strip('\r\n ') for x in open('data/vocab.txt')]
+    vocab = Vocab(vocab)
+    mol_batch = [MolTree(smiles) for smiles in smiles_batch]
+    for mol_tree in mol_batch:
+        mol_tree.recover()
+        mol_tree.assemble()
+    set_batch_nodeID(mol_batch, vocab)
+    nx_mol_batch = [DGLMolTree(smiles) for smiles in smiles_batch]
+    for nx_mol_tree in nx_mol_batch:
+        nx_mol_tree.recover()
+        nx_mol_tree.assemble()
+    dgl_set_batch_nodeID(nx_mol_batch, vocab)
+
+    vae = JTNNVAE(vocab, 50, 50, 3)
+    dglvae = DGLJTNNVAE(vocab, 50, 50, 3)
+    e1 = torch.randn(len(smiles_batch), 25)
+    e2 = torch.randn(len(smiles_batch), 25)
+
+    dglvae.embedding = vae.embedding
+    dgljtnn, dgljtmpn, dglmpn, dgldecoder = dglvae.jtnn, dglvae.jtmpn, dglvae.mpn, dglvae.decoder
+    jtnn, mpn, decoder, jtmpn = vae.jtnn, vae.mpn, vae.decoder, vae.jtmpn
+    dgljtnn.enc_tree_update.W_z = jtnn.W_z
+    dgljtnn.enc_tree_update.W_h = jtnn.W_h
+    dgljtnn.enc_tree_update.W_r = jtnn.W_r
+    dgljtnn.enc_tree_update.U_r = jtnn.U_r
+    dgljtnn.enc_tree_gather_update.W = jtnn.W
+    dgljtnn.embedding = jtnn.embedding
+    dgljtmpn.W_i = jtmpn.W_i
+    dgljtmpn.gather_updater.W_o = jtmpn.W_o
+    dgljtmpn.loopy_bp_updater.W_h = jtmpn.W_h
+    mpn.W_i = dglmpn.W_i
+    mpn.W_o = dglmpn.gather_updater.W_o
+    mpn.W_h = dglmpn.loopy_bp_updater.W_h
+    decoder.W = dgldecoder.W
+    decoder.U = dgldecoder.U
+    decoder.W_o = dgldecoder.W_o
+    decoder.U_s = dgldecoder.U_s
+    decoder.W_z = dgldecoder.dec_tree_edge_update.W_z
+    decoder.W_r = dgldecoder.dec_tree_edge_update.W_r
+    decoder.U_r = dgldecoder.dec_tree_edge_update.U_r
+    decoder.W_h = dgldecoder.dec_tree_edge_update.W_h
+    decoder.embedding = dgldecoder.embedding
+    dglvae.T_mean = vae.T_mean
+    dglvae.G_mean = vae.G_mean
+    dglvae.T_var = vae.T_var
+    dglvae.G_var = vae.G_var
+
+    loss, kl_loss, wacc, tacc, aacc, sacc = vae(mol_batch, e1=e1, e2=e2)
+    loss_dgl, kl_loss_dgl, wacc_dgl, tacc_dgl, aacc_dgl, sacc_dgl = dglvae(nx_mol_batch, e1=e1, e2=e2)
+
+    assert torch.allclose(loss, loss_dgl)
+    assert torch.allclose(kl_loss, kl_loss_dgl)
+    assert torch.allclose(wacc, wacc_dgl)
+    assert torch.allclose(tacc, tacc_dgl)
+    assert np.allclose(aacc, aacc_dgl)
+    assert np.allclose(sacc, sacc_dgl)
+
+
 if __name__ == '__main__':
-    test_mpn()
-    test_treeenc()
-    test_treedec()
+    #test_mpn()
+    #test_treeenc()
+    #test_treedec()
+    test_vae()

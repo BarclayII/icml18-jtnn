@@ -6,6 +6,7 @@ from .chemutils import get_mol
 import rdkit.Chem as Chem
 from dgl import DGLGraph, line_graph, batch, unbatch
 from .profile import profile
+import os
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
 
@@ -13,7 +14,7 @@ ATOM_FDIM = len(ELEM_LIST) + 6 + 5 + 1
 BOND_FDIM = 5 
 MAX_NB = 10
 
-PAPER = False
+PAPER = os.getenv('PAPER', False)
 
 def onek_encoding_unk(x, allowable_set):
     if x not in allowable_set:
@@ -123,11 +124,6 @@ class JTMPN(nn.Module):
         agraph = create_var(agraph)
         bgraph = create_var(bgraph)
 
-        self.fatoms = fatoms
-        self.fbonds = fbonds
-        self.agraph = agraph
-        self.bgraph = bgraph
-
         binput = self.W_i(fbonds)
         graph_message = nn.ReLU()(binput)
 
@@ -141,7 +137,6 @@ class JTMPN(nn.Module):
         message = torch.cat([tree_message,graph_message], dim=0)
         nei_message = index_select_ND(message, 0, agraph)
         nei_message = nei_message.sum(dim=1)
-        self.nei_message = nei_message
         ainput = torch.cat([fatoms, nei_message], dim=1)
         atom_hiddens = nn.ReLU()(self.W_o(ainput))
         
