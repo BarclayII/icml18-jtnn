@@ -8,24 +8,28 @@ from jtnn.jtnn_vae import set_batch_nodeID, dgl_set_batch_nodeID, JTNNVAE, DGLJT
 import torch
 from torch import nn
 from dgl import batch
+import rdkit
 from rdkit import Chem
 import numpy as np
 
+lg = rdkit.RDLogger.logger() 
+lg.setLevel(rdkit.RDLogger.CRITICAL)
+
 torch.manual_seed(1)
 
-smiles_batch = '''
-CCCCCCC1=NN2C(=N)/C(=C\c3cc(C)n(-c4ccc(C)cc4C)c3C)C(=O)N=C2S1
-COCC[C@@H](C)C(=O)N(C)Cc1ccc(O)cc1
-C=CCn1c(S[C@H](C)c2nc3sc(C)c(C)c3c(=O)[nH]2)nnc1C1CC1
-C[NH+](C/C=C/c1ccco1)CCC(F)(F)F
-COc1ccc(N2C(=O)C(=O)N(CN3CCC(c4nc5ccccc5s4)CC3)C2=O)cc1
-Cc1ccc([C@@H](C)[NH2+][C@H](C)C(=O)Nc2ccccc2F)cc1
-O=c1cc(C[NH2+]Cc2cccc(Cl)c2)nc(N2CCCC2)[nH]1
-O=C(Cn1nc(C(=O)[O-])c2ccccc2c1=O)Nc1ccc2c(c1)C(=O)c1ccccc1C2=O
-'''.strip().split()
 #smiles_batch = '''
 #CCCCCCC1=NN2C(=N)/C(=C\c3cc(C)n(-c4ccc(C)cc4C)c3C)C(=O)N=C2S1
+#COCC[C@@H](C)C(=O)N(C)Cc1ccc(O)cc1
+#C=CCn1c(S[C@H](C)c2nc3sc(C)c(C)c3c(=O)[nH]2)nnc1C1CC1
+#C[NH+](C/C=C/c1ccco1)CCC(F)(F)F
+#COc1ccc(N2C(=O)C(=O)N(CN3CCC(c4nc5ccccc5s4)CC3)C2=O)cc1
+#Cc1ccc([C@@H](C)[NH2+][C@H](C)C(=O)Nc2ccccc2F)cc1
+#O=c1cc(C[NH2+]Cc2cccc(Cl)c2)nc(N2CCCC2)[nH]1
+#O=C(Cn1nc(C(=O)[O-])c2ccccc2c1=O)Nc1ccc2c(c1)C(=O)c1ccccc1C2=O
 #'''.strip().split()
+smiles_batch = '''
+c1ccccc1
+'''.strip().split()
 
 def allclose(a, b):
     return torch.allclose(a, b, rtol=1e-4, atol=1e-7)
@@ -228,7 +232,7 @@ def test_vae():
 
 
 if __name__ == '__main__':
-    #test_mpn()
-    #test_treeenc()
-    #test_treedec()
+    test_mpn()
+    test_treeenc()
+    test_treedec()
     test_vae()

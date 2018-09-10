@@ -61,5 +61,5 @@ class GRUUpdate(nn.Module):
         r_2 = self.U_r(m)
         r = torch.sigmoid(r_1 + r_2)
 
-        return {'m': m, 'r': r, 'z': z}
+        return {'m': m, 'r': r, 'z': z, 'rm': r * m}
 

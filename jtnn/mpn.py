@@ -6,6 +6,7 @@ from .nnutils import *
 from .chemutils import get_mol
 from networkx import Graph, DiGraph, line_graph, convert_node_labels_to_integers
 from dgl import DGLGraph, line_graph, batch, unbatch
+import dgl.function as DGLF
 from functools import partial
 from .profile import profile
 
@@ -165,12 +166,14 @@ class MPN(nn.Module):
         return mol_vecs
 
 # TODO: use SPMV
-def mpn_loopy_bp_msg(src, edge):
-    return src['msg']
+#def mpn_loopy_bp_msg(src, edge):
+#    return src['msg']
+mpn_loopy_bp_msg = DGLF.copy_src(src='msg', out='msg')
 
 
-def mpn_loopy_bp_reduce(node, msgs):
-    return {'accum_msg': torch.sum(msgs, 1)}
+#def mpn_loopy_bp_reduce(node, msgs):
+#    return {'accum_msg': torch.sum(msgs, 1)}
+mpn_loopy_bp_reduce = DGLF.sum(msgs='msg', out='accum_msg')
 
 
 class LoopyBPUpdate(nn.Module):
@@ -188,12 +191,14 @@ class LoopyBPUpdate(nn.Module):
 
 
 # TODO: can we use SPMV?
-def mpn_gather_msg(src, edge):
-    return edge['msg']
+#def mpn_gather_msg(src, edge):
+#    return edge['msg']
+mpn_gather_msg = DGLF.copy_edge(edge='msg', out=None)
 
 
-def mpn_gather_reduce(node, msgs):
-    return {'m': torch.sum(msgs, 1)}
+#def mpn_gather_reduce(node, msgs):
+#    return {'m': torch.sum(msgs, 1)}
+mpn_gather_reduce = DGLF.sum(msgs=None, out='m')
 
 
 class GatherUpdate(nn.Module):
