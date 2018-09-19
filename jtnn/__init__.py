@@ -5,4 +5,4 @@ from .mpn import MPN, mol2graph, DGLMPN, mol2dgl
 from .nnutils import create_var
 from .datautils import MoleculeDataset, PropDataset, DGLMoleculeDataset, DGLPropDataset
 from .chemutils import decode_stereo
-from .profile import profile
+from .line_profiler_integration import profile

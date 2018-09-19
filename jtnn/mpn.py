@@ -8,7 +8,7 @@ from networkx import Graph, DiGraph, line_graph, convert_node_labels_to_integers
 from dgl import DGLGraph, line_graph, batch, unbatch
 import dgl.function as DGLF
 from functools import partial
-from .profile import profile
+from .line_profiler_integration import profile
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
 
@@ -193,12 +193,12 @@ class LoopyBPUpdate(nn.Module):
 # TODO: can we use SPMV?
 #def mpn_gather_msg(src, edge):
 #    return edge['msg']
-mpn_gather_msg = DGLF.copy_edge(edge='msg', out=None)
+mpn_gather_msg = DGLF.copy_edge(edge='msg', out='msg')
 
 
 #def mpn_gather_reduce(node, msgs):
 #    return {'m': torch.sum(msgs, 1)}
-mpn_gather_reduce = DGLF.sum(msgs=None, out='m')
+mpn_gather_reduce = DGLF.sum(msgs='msg', out='m')
 
 
 class GatherUpdate(nn.Module):
@@ -231,6 +231,14 @@ class DGLMPN(nn.Module):
     def forward(self, mol_graph_list):
         mol_graph = batch(mol_graph_list)
         mol_line_graph = line_graph(mol_graph, no_backtracking=True)
+        mol_graph = self.run(mol_graph, mol_line_graph)
+        mol_graph_list = unbatch(mol_graph)
+        g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in mol_graph_list], 0)
+
+        return g_repr
+
+    @profile
+    def run(self, mol_graph, mol_line_graph):
         n_nodes = len(mol_graph.nodes)
 
         mol_graph.update_edge(
@@ -269,7 +277,4 @@ class DGLMPN(nn.Module):
             True
         )
 
-        mol_graph_list = unbatch(mol_graph)
-        g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in mol_graph_list], 0)
-
-        return g_repr
+        return mol_graph

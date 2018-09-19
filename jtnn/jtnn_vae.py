@@ -7,7 +7,7 @@ from .jtnn_enc import JTNNEncoder, DGLJTNNEncoder
 from .jtnn_dec import JTNNDecoder, DGLJTNNDecoder
 from .mpn import MPN, mol2graph, DGLMPN, mol2dgl
 from .jtmpn import JTMPN, DGLJTMPN
-from .profile import profile
+from .line_profiler_integration import profile
 
 from .chemutils import enum_assemble, set_atommap, copy_edit_mol, attach_mols, atom_equal, decode_stereo
 import rdkit

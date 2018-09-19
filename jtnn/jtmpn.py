@@ -5,7 +5,8 @@ from .chemutils import get_mol
 #from mpn import atom_features, bond_features, ATOM_FDIM, BOND_FDIM
 import rdkit.Chem as Chem
 from dgl import DGLGraph, line_graph, batch, unbatch
-from .profile import profile
+import dgl.function as DGLF
+from .line_profiler_integration import profile
 import os
 
 ELEM_LIST = ['C', 'N', 'O', 'S', 'F', 'Si', 'P', 'Cl', 'Br', 'Mg', 'Na', 'Ca', 'Fe', 'Al', 'I', 'B', 'K', 'Se', 'Zn', 'H', 'Cu', 'Mn', 'unknown']
@@ -212,12 +213,14 @@ def mol2dgl(cand_batch, mol_tree_batch):
 
 
 # TODO: use SPMV
-def mpn_loopy_bp_msg(src, edge):
-    return src['msg']
+mpn_loopy_bp_msg = DGLF.copy_src(src='msg', out='msg')
+#def mpn_loopy_bp_msg(src, edge):
+#    return src['msg']
 
 
-def mpn_loopy_bp_reduce(node, msgs):
-    return {'accum_msg': torch.sum(msgs, 1)}
+mpn_loopy_bp_reduce = DGLF.sum(msgs='msg', out='accum_msg')
+#def mpn_loopy_bp_reduce(node, msgs):
+#    return {'accum_msg': torch.sum(msgs, 1)}
 
 
 class LoopyBPUpdate(nn.Module):
@@ -235,18 +238,32 @@ class LoopyBPUpdate(nn.Module):
 
 
 # TODO: can we use SPMV?
-def mpn_gather_msg(src, edge):
-    if PAPER:
-        return {'msg': edge['msg'], 'alpha': edge['alpha']}
-    else:
-        return {'msg': edge['msg']}
+#def mpn_gather_msg(src, edge):
+#    if PAPER:
+#        return {'msg': edge['msg'], 'alpha': edge['alpha']}
+#    else:
+#        return {'msg': edge['msg']}
+if PAPER:
+    mpn_gather_msg = [
+        DGLF.copy_edge(edge='msg', out='msg'),
+        DGLF.copy_edge(edge='alpha', out='alpha')
+    ]
+else:
+    mpn_gather_msg = DGLF.copy_edge(edge='msg', out='msg')
 
 
-def mpn_gather_reduce(node, msgs):
-    if PAPER:
-        return {'m': torch.sum(msgs['msg'], 1) + torch.sum(msgs['alpha'], 1)}
-    else:
-        return {'m': torch.sum(msgs['msg'], 1)}
+#def mpn_gather_reduce(node, msgs):
+#    if PAPER:
+#        return {'m': torch.sum(msgs['msg'], 1) + torch.sum(msgs['alpha'], 1)}
+#    else:
+#        return {'m': torch.sum(msgs['msg'], 1)}
+if PAPER:
+    mpn_gather_reduce = [
+        DGLF.sum(msgs='msg', out='m'),
+        DGLF.sum(msgs='alpha', out='accum_alpha'),
+    ]
+else:
+    mpn_gather_reduce = DGLF.sum(msgs='msg', out='m')
 
 
 class GatherUpdate(nn.Module):
@@ -258,7 +275,8 @@ class GatherUpdate(nn.Module):
 
     def forward(self, node):
         if PAPER:
-            m = node['m']
+            #m = node['m']
+            m = node['m'] + node['accum_alpha']
         else:
             m = node['m'] + node['alpha']
         return {
@@ -282,8 +300,21 @@ class DGLJTMPN(nn.Module):
     def forward(self, cand_batch, mol_tree_batch):
         cand_graphs, tree_mess_src_edges, tree_mess_tgt_edges, tree_mess_tgt_nodes = \
                 mol2dgl(cand_batch, mol_tree_batch)
-
         cand_graphs = batch(cand_graphs)
+        cand_line_graph = line_graph(cand_graphs, no_backtracking=True)
+
+        cand_graphs = self.run(
+                cand_graphs, cand_line_graph, tree_mess_src_edges, tree_mess_tgt_edges,
+                tree_mess_tgt_nodes, mol_tree_batch)
+
+        cand_graphs = unbatch(cand_graphs)
+        g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in cand_graphs], 0)
+
+        return g_repr
+
+    @profile
+    def run(self, cand_graphs, cand_line_graph, tree_mess_src_edges, tree_mess_tgt_edges,
+            tree_mess_tgt_nodes, mol_tree_batch):
         n_nodes = len(cand_graphs.nodes)
 
         cand_graphs.update_edge(
@@ -291,8 +322,6 @@ class DGLJTMPN(nn.Module):
             lambda src, dst, edge: {'src_x': src['x']},
             batchable=True,
         )
-
-        cand_line_graph = line_graph(cand_graphs, no_backtracking=True)
 
         bond_features = cand_line_graph.get_n_repr()['x']
         source_features = cand_line_graph.get_n_repr()['src_x']
@@ -345,7 +374,4 @@ class DGLJTMPN(nn.Module):
             True
         )
 
-        cand_graphs = unbatch(cand_graphs)
-        g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in cand_graphs], 0)
-
-        return g_repr
+        return cand_graphs

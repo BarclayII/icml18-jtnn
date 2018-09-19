@@ -7,8 +7,9 @@ from .chemutils import enum_assemble
 import copy
 import itertools
 from dgl import batch, line_graph
+import dgl.function as DGLF
 import networkx as nx
-from .profile import profile
+from .line_profiler_integration import profile
 
 MAX_NB = 8
 MAX_DECODE_LEN = 100
@@ -350,24 +351,28 @@ def dfs_order(forest, roots):
         yield u, v, i, p
 
 
-def dec_tree_node_msg(src, edge):
-    return edge['m']
+dec_tree_node_msg = DGLF.copy_edge(edge='m', out='m')
+#def dec_tree_node_msg(src, edge):
+#    return edge['m']
 
 
-def dec_tree_node_reduce(node, msgs):
-    return {'h': msgs.sum(1)}
+dec_tree_node_reduce = DGLF.sum(msgs='m', out='h')
+#def dec_tree_node_reduce(node, msgs):
+#    return {'h': msgs.sum(1)}
 
 
 def dec_tree_node_update(node):
     return {'new': node['new'].clone().zero_()}
 
 
-def dec_tree_edge_msg(src, edge):
-    return {'m': src['m'], 'rm': src['r'] * src['m']}
+dec_tree_edge_msg = [DGLF.copy_src(src='m', out='m'), DGLF.copy_src(src='rm', out='rm')]
+#def dec_tree_edge_msg(src, edge):
+#    return {'m': src['m'], 'rm': src['r'] * src['m']}
 
 
-def dec_tree_edge_reduce(node, msgs):
-    return {'s': msgs['m'].sum(1), 'accum_rm': msgs['rm'].sum(1)}
+dec_tree_edge_reduce = [DGLF.sum(msgs='m', out='s'), DGLF.sum(msgs='rm', out='accum_rm')]
+#def dec_tree_edge_reduce(node, msgs):
+#    return {'s': msgs['m'].sum(1), 'accum_rm': msgs['rm'].sum(1)}
 
 
 class DGLJTNNDecoder(nn.Module):
@@ -397,8 +402,13 @@ class DGLJTNNDecoder(nn.Module):
         ground truth tree
         '''
         mol_tree_batch = batch(mol_trees)
+        mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
         n_trees = len(mol_trees)
 
+        return self.run(mol_tree_batch, mol_tree_batch_lg, n_trees, tree_vec)
+
+    @profile
+    def run(self, mol_tree_batch, mol_tree_batch_lg, n_trees, tree_vec):
         root_ids = mol_tree_batch.node_offset[:-1]
         n_nodes = len(mol_tree_batch.nodes)
         edge_list = mol_tree_batch.edge_list
@@ -417,6 +427,7 @@ class DGLJTNNDecoder(nn.Module):
             'z': torch.zeros(n_edges, self.hidden_size),
             'src_x': torch.zeros(n_edges, self.hidden_size),
             'dst_x': torch.zeros(n_edges, self.hidden_size),
+            'rm': torch.zeros(n_edges, self.hidden_size),
             'accum_rm': torch.zeros(n_edges, self.hidden_size),
         })
 
@@ -425,8 +436,6 @@ class DGLJTNNDecoder(nn.Module):
             lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
             batchable=True,
         )
-
-        mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
 
         # input tensors for stop prediction (p) and label prediction (q)
         p_inputs = []

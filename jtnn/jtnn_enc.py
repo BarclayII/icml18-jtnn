@@ -6,7 +6,8 @@ from .nnutils import create_var, GRU, GRUUpdate
 import itertools
 import networkx as nx
 from dgl import batch, unbatch, line_graph
-from .profile import profile
+import dgl.function as DGLF
+from .line_profiler_integration import profile
 
 MAX_NB = 8
 
@@ -147,20 +148,24 @@ def level_order(forest, roots):
         yield u, v
 
 
-def enc_tree_msg(src, edge):
-    return {'m': src['m'], 'rm': src['r'] * src['m']}
+enc_tree_msg = [DGLF.copy_src(src='m', out='m'), DGLF.copy_src(src='rm', out='rm')]
+#def enc_tree_msg(src, edge):
+#    return {'m': src['m'], 'rm': src['r'] * src['m']}
 
 
-def enc_tree_reduce(node, msgs):
-    return {'s': msgs['m'].sum(1), 'accum_rm': msgs['rm'].sum(1)}
+enc_tree_reduce = [DGLF.sum(msgs='m', out='s'), DGLF.sum(msgs='rm', out='accum_rm')]
+#def enc_tree_reduce(node, msgs):
+#    return {'s': msgs['m'].sum(1), 'accum_rm': msgs['rm'].sum(1)}
 
 
-def enc_tree_gather_msg(src, edge):
-    return edge['m']
+enc_tree_gather_msg = DGLF.copy_edge(edge='m', out='m')
+#def enc_tree_gather_msg(src, edge):
+#    return edge['m']
 
 
-def enc_tree_gather_reduce(node, msgs):
-    return {'m': msgs.sum(1)}
+enc_tree_gather_reduce = DGLF.sum(msgs='m', out='m')
+#def enc_tree_gather_reduce(node, msgs):
+#    return {'m': msgs.sum(1)}
 
 
 class EncoderGatherUpdate(nn.Module):
@@ -196,6 +201,14 @@ class DGLJTNNEncoder(nn.Module):
     @profile
     def forward(self, mol_trees):
         mol_tree_batch = batch(mol_trees)
+        
+        # Build line graph to prepare for belief propagation
+        mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
+
+        return self.run(mol_tree_batch, mol_tree_batch_lg)
+
+    @profile
+    def run(self, mol_tree_batch, mol_tree_batch_lg):
         # Since tree roots are designated to 0.  In the batched graph we can
         # simply find the corresponding node ID by looking at node_offset
         root_ids = mol_tree_batch.node_offset[:-1]
@@ -219,6 +232,7 @@ class DGLJTNNEncoder(nn.Module):
             'z': torch.zeros(n_edges, self.hidden_size),
             'src_x': torch.zeros(n_edges, self.hidden_size),
             'dst_x': torch.zeros(n_edges, self.hidden_size),
+            'rm': torch.zeros(n_edges, self.hidden_size),
             'accum_rm': torch.zeros(n_edges, self.hidden_size),
         })
 
@@ -228,9 +242,6 @@ class DGLJTNNEncoder(nn.Module):
             lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
             batchable=True,
         )
-
-        # Build line graph to prepare for belief propagation
-        mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
 
         # Message passing
         # I exploited the fact that the reduce function is a sum of incoming
