@@ -242,8 +242,8 @@ class DGLMPN(nn.Module):
         n_nodes = len(mol_graph.nodes)
 
         mol_graph.update_edge(
-            *zip(*mol_graph.edge_list),
-            lambda src, dst, edge: {'src_x': src['x']},
+            #*zip(*mol_graph.edge_list),
+            edge_func=lambda src, dst, edge: {'src_x': src['x']},
             batchable=True,
         )
 

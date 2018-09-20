@@ -318,8 +318,8 @@ class DGLJTMPN(nn.Module):
         n_nodes = len(cand_graphs.nodes)
 
         cand_graphs.update_edge(
-            *zip(*cand_graphs.edge_list),
-            lambda src, dst, edge: {'src_x': src['x']},
+            #*zip(*cand_graphs.edge_list),
+            edge_func=lambda src, dst, edge: {'src_x': src['x']},
             batchable=True,
         )
 
@@ -354,8 +354,8 @@ class DGLJTMPN(nn.Module):
             node_alpha = zero_node_state.clone().scatter_add(0, node_idx, alpha)
             cand_graphs.set_n_repr({'alpha': node_alpha})
             cand_graphs.update_edge(
-                *zip(*cand_graphs.edge_list),
-                lambda src, dst, edge: {'alpha': src['alpha']},
+                #*zip(*cand_graphs.edge_list),
+                edge_func=lambda src, dst, edge: {'alpha': src['alpha']},
                 batchable=True,
             )
 

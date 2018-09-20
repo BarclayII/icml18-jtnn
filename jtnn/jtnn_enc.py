@@ -238,8 +238,8 @@ class DGLJTNNEncoder(nn.Module):
 
         # Send the source/destination node features to edges
         mol_tree_batch.update_edge(
-            *zip(*edge_list),
-            lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
+            #*zip(*edge_list),
+            edge_func=lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
             batchable=True,
         )
 
