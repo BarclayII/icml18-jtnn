@@ -106,3 +106,16 @@ def train():
 
 if __name__ == '__main__':
     train()
+
+    print('# passes:', model.n_passes)
+    print('Total # nodes processed:', model.n_nodes_total)
+    print('Total # edges processed:', model.n_edges_total)
+    print('Total # tree nodes processed:', model.n_tree_nodes_total)
+    print('Graph decoder: # passes:', model.jtmpn.n_passes)
+    print('Graph decoder: Total # candidates processed:', model.jtmpn.n_samples_total)
+    print('Graph decoder: Total # nodes processed:', model.jtmpn.n_nodes_total)
+    print('Graph decoder: Total # edges processed:', model.jtmpn.n_edges_total)
+    print('Graph encoder: # passes:', model.mpn.n_passes)
+    print('Graph encoder: Total # candidates processed:', model.mpn.n_samples_total)
+    print('Graph encoder: Total # nodes processed:', model.mpn.n_nodes_total)
+    print('Graph encoder: Total # edges processed:', model.mpn.n_edges_total)

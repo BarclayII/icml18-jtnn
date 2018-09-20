@@ -227,13 +227,29 @@ class DGLMPN(nn.Module):
         self.gather_updater = GatherUpdate(hidden_size)
         self.hidden_size = hidden_size
 
+        self.n_samples_total = 0
+        self.n_nodes_total = 0
+        self.n_edges_total = 0
+        self.n_passes = 0
+
     @profile
     def forward(self, mol_graph_list):
+        n_samples = len(mol_graph_list)
+
         mol_graph = batch(mol_graph_list)
         mol_line_graph = line_graph(mol_graph, no_backtracking=True)
+
+        n_nodes = len(mol_graph.nodes)
+        n_edges = len(mol_graph.edges)
+
         mol_graph = self.run(mol_graph, mol_line_graph)
         mol_graph_list = unbatch(mol_graph)
         g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in mol_graph_list], 0)
+
+        self.n_samples_total += n_samples
+        self.n_nodes_total += n_nodes
+        self.n_edges_total += n_edges
+        self.n_passes += 1
 
         return g_repr
 

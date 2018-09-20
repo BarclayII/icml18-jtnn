@@ -303,12 +303,23 @@ class DGLJTMPN(nn.Module):
         self.gather_updater = GatherUpdate(hidden_size)
         self.hidden_size = hidden_size
 
+        self.n_samples_total = 0
+        self.n_nodes_total = 0
+        self.n_edges_total = 0
+        self.n_passes = 0
+
     @profile
     def forward(self, cand_batch, mol_tree_batch):
         cand_graphs, tree_mess_src_edges, tree_mess_tgt_edges, tree_mess_tgt_nodes = \
                 mol2dgl(cand_batch, mol_tree_batch)
+
+        n_samples = len(cand_graphs)
+
         cand_graphs = batch(cand_graphs)
         cand_line_graph = line_graph(cand_graphs, no_backtracking=True)
+
+        n_nodes = len(cand_graphs.nodes)
+        n_edges = len(cand_graphs.edges)
 
         cand_graphs = self.run(
                 cand_graphs, cand_line_graph, tree_mess_src_edges, tree_mess_tgt_edges,
@@ -316,6 +327,11 @@ class DGLJTMPN(nn.Module):
 
         cand_graphs = unbatch(cand_graphs)
         g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in cand_graphs], 0)
+
+        self.n_samples_total += n_samples
+        self.n_nodes_total += n_nodes
+        self.n_edges_total += n_edges
+        self.n_passes += 1
 
         return g_repr
 

@@ -350,14 +350,25 @@ class DGLJTNNVAE(nn.Module):
         self.G_mean = nn.Linear(hidden_size, latent_size // 2)
         self.G_var = nn.Linear(hidden_size, latent_size // 2)
 
+        self.n_nodes_total = 0
+        self.n_passes = 0
+        self.n_edges_total = 0
+        self.n_tree_nodes_total = 0
+
     @profile
     def encode(self, mol_batch):
         dgl_set_batch_nodeID(mol_batch, self.vocab)
 
         smiles_batch = [mol_tree.smiles for mol_tree in mol_batch]
-        mol_vec = self.mpn(mol2dgl(smiles_batch))
+        mol_graphs = mol2dgl(smiles_batch)
+        mol_vec = self.mpn(mol_graphs)
         # mol_batch is a junction tree
         mol_tree_batch, tree_vec = self.jtnn(mol_batch)
+
+        self.n_nodes_total += sum(len(g.nodes) for g in mol_graphs)
+        self.n_edges_total += sum(len(g.edges) for g in mol_graphs)
+        self.n_tree_nodes_total += sum(len(t.nodes) for t in mol_batch)
+        self.n_passes += 1
 
         return mol_tree_batch, tree_vec, mol_vec
 

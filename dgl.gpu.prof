@@ -78,194 +78,217 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
    120                                                           if b2 < total_mess or all_bonds[b2-total_mess][0] != y:
    121                                                               bgraph[b1,i] = b2
    122                                           
-   123                                                   fatoms = create_var(fatoms)
-   124                                                   fbonds = create_var(fbonds)
-   125                                                   agraph = create_var(cuda(agraph))
-   126                                                   bgraph = create_var(cuda(bgraph))
-   127                                           
-   128                                                   binput = self.W_i(fbonds)
-   129                                                   graph_message = nn.ReLU()(binput)
-   130                                           
-   131                                                   for i in range(self.depth - 1):
-   132                                                       message = torch.cat([tree_message,graph_message], dim=0)
-   133                                                       nei_message = index_select_ND(message, 0, bgraph)
-   134                                                       nei_message = nei_message.sum(dim=1)
-   135                                                       nei_message = self.W_h(nei_message)
-   136                                                       graph_message = nn.ReLU()(binput + nei_message)
-   137                                           
-   138                                                   message = torch.cat([tree_message,graph_message], dim=0)
-   139                                                   nei_message = index_select_ND(message, 0, agraph)
-   140                                                   nei_message = nei_message.sum(dim=1)
-   141                                                   ainput = torch.cat([fatoms, nei_message], dim=1)
-   142                                                   atom_hiddens = nn.ReLU()(self.W_o(ainput))
-   143                                                   
-   144                                                   mol_vecs = []
-   145                                                   for st,le in scope:
-   146                                                       mol_vec = atom_hiddens.narrow(0, st, le).sum(dim=0) / le
-   147                                                       mol_vecs.append(mol_vec)
-   148                                           
-   149                                                   mol_vecs = torch.stack(mol_vecs, dim=0)
-   150                                                   return mol_vecs
+   123                                                   atom_hiddens = self.run(fatoms, fbonds, agraph, bgraph, tree_message)
+   124                                                   
+   125                                                   mol_vecs = []
+   126                                                   for st,le in scope:
+   127                                                       mol_vec = atom_hiddens.narrow(0, st, le).sum(dim=0) / le
+   128                                                       mol_vecs.append(mol_vec)
+   129                                           
+   130                                                   mol_vecs = torch.stack(mol_vecs, dim=0)
+   131                                                   return mol_vecs
 
-Total time: 314.783 s
+Total time: 0 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtmpn.py
-Function: mol2dgl at line 152
+Function: run at line 133
 
 Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
-   152                                           @profile
-   153                                           def mol2dgl(cand_batch, mol_tree_batch):
-   154       200        163.0      0.8      0.0      cand_graphs = []
-   155       200        138.0      0.7      0.0      tree_mess_source_edges = [] # map these edges from trees to...
-   156       200        126.0      0.6      0.0      tree_mess_target_edges = [] # these edges on candidate graphs
-   157       200        120.0      0.6      0.0      tree_mess_target_nodes = []
-   158       200        123.0      0.6      0.0      n_nodes = 0
-   159                                           
-   160    170503     142407.0      0.8      0.0      for mol, mol_tree, ctr_node_id in cand_batch:
-   161    170303    1171808.0      6.9      0.4          atom_feature_list = []
-   162    170303     964040.0      5.7      0.3          bond_feature_list = []
-   163    170303     731053.0      4.3      0.2          ctr_node = mol_tree.nodes[ctr_node_id]
-   164    170303     133022.0      0.8      0.0          ctr_bid = ctr_node['idx']
-   165    170303    4318897.0     25.4      1.4          g = DGLGraph()
+   133                                               @profile
+   134                                               def run(self, fatoms, fbonds, agraph, bgraph, tree_message):
+   135                                                   fatoms = create_var(fatoms)
+   136                                                   fbonds = create_var(fbonds)
+   137                                                   agraph = create_var(cuda(agraph))
+   138                                                   bgraph = create_var(cuda(bgraph))
+   139                                           
+   140                                                   binput = self.W_i(fbonds)
+   141                                                   graph_message = nn.ReLU()(binput)
+   142                                           
+   143                                                   for i in range(self.depth - 1):
+   144                                                       message = torch.cat([tree_message,graph_message], dim=0)
+   145                                                       nei_message = index_select_ND(message, 0, bgraph)
+   146                                                       nei_message = nei_message.sum(dim=1)
+   147                                                       nei_message = self.W_h(nei_message)
+   148                                                       graph_message = nn.ReLU()(binput + nei_message)
+   149                                           
+   150                                                   message = torch.cat([tree_message,graph_message], dim=0)
+   151                                                   nei_message = index_select_ND(message, 0, agraph)
+   152                                                   nei_message = nei_message.sum(dim=1)
+   153                                                   ainput = torch.cat([fatoms, nei_message], dim=1)
+   154                                                   atom_hiddens = nn.ReLU()(self.W_o(ainput))
+   155                                           
+   156                                                   return atom_hiddens
+
+Total time: 335.844 s
+File: /home/gq/ML/icml18-jtnn/jtnn/jtmpn.py
+Function: mol2dgl at line 159
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   159                                           @profile
+   160                                           def mol2dgl(cand_batch, mol_tree_batch):
+   161       200        165.0      0.8      0.0      cand_graphs = []
+   162       200        135.0      0.7      0.0      tree_mess_source_edges = [] # map these edges from trees to...
+   163       200        119.0      0.6      0.0      tree_mess_target_edges = [] # these edges on candidate graphs
+   164       200        142.0      0.7      0.0      tree_mess_target_nodes = []
+   165       200        119.0      0.6      0.0      n_nodes = 0
    166                                           
-   167   1954519   20018633.0     10.2      6.4          for atom in mol.GetAtoms():
-   168   1784216   62663046.0     35.1     19.9              atom_feature_list.append(atom_features(atom))
-   169   1784216   24772883.0     13.9      7.9              g.add_node(atom.GetIdx())
-   170                                           
-   171   2068468   19607808.0      9.5      6.2          for bond in mol.GetBonds():
-   172   1898165    2534523.0      1.3      0.8              a1 = bond.GetBeginAtom()
-   173   1898165    1792937.0      0.9      0.6              a2 = bond.GetEndAtom()
-   174   1898165    1719749.0      0.9      0.5              begin_idx = a1.GetIdx()
-   175   1898165    1454491.0      0.8      0.5              end_idx = a2.GetIdx()
-   176   1898165   49946512.0     26.3     15.9              features = bond_features(bond)
+   167    170503     153602.0      0.9      0.0      for mol, mol_tree, ctr_node_id in cand_batch:
+   168    170303    1260268.0      7.4      0.4          atom_feature_list = []
+   169    170303    1028770.0      6.0      0.3          bond_feature_list = []
+   170    170303     751614.0      4.4      0.2          ctr_node = mol_tree.nodes[ctr_node_id]
+   171    170303     132303.0      0.8      0.0          ctr_bid = ctr_node['idx']
+   172    170303    4334297.0     25.5      1.3          g = DGLGraph()
+   173                                           
+   174   1954519   21022546.0     10.8      6.3          for atom in mol.GetAtoms():
+   175   1784216   69588259.0     39.0     20.7              atom_feature_list.append(atom_features(atom))
+   176   1784216   24311475.0     13.6      7.2              g.add_node(atom.GetIdx())
    177                                           
-   178   1898165   26646522.0     14.0      8.5              g.add_edge(begin_idx, end_idx)
-   179   1898165    1546331.0      0.8      0.5              bond_feature_list.append(features)
-   180   1898165   16671664.0      8.8      5.3              g.add_edge(end_idx, begin_idx)
-   181   1898165    1409448.0      0.7      0.4              bond_feature_list.append(features)
-   182                                           
-   183   1898165    3806858.0      2.0      1.2              x_nid, y_nid = a1.GetAtomMapNum(), a2.GetAtomMapNum()
-   184                                                       # Tree node ID in the batch
-   185   1898165    6147321.0      3.2      2.0              x_bid = mol_tree.nodes[x_nid - 1]['idx'] if x_nid > 0 else -1
-   186   1898165    4484577.0      2.4      1.4              y_bid = mol_tree.nodes[y_nid - 1]['idx'] if y_nid > 0 else -1
-   187   1898165    1451550.0      0.8      0.5              if x_bid >= 0 and y_bid >= 0 and x_bid != y_bid:
-   188    449880    3494509.0      7.8      1.1                  if (x_bid, y_bid) in mol_tree_batch.edge_list:
-   189    447940     318510.0      0.7      0.1                      tree_mess_target_edges.append(
-   190    447940     463395.0      1.0      0.1                              (begin_idx + n_nodes, end_idx + n_nodes))
-   191    447940     369004.0      0.8      0.1                      tree_mess_source_edges.append((x_bid, y_bid))
-   192    447940     352221.0      0.8      0.1                      tree_mess_target_nodes.append(end_idx + n_nodes)
-   193    449880    2605580.0      5.8      0.8                  if (y_bid, x_bid) in mol_tree_batch.edge_list:
-   194    447940     287797.0      0.6      0.1                      tree_mess_target_edges.append(
-   195    447940     386547.0      0.9      0.1                              (end_idx + n_nodes, begin_idx + n_nodes))
-   196    447940     436499.0      1.0      0.1                      tree_mess_source_edges.append((y_bid, x_bid))
-   197    447940     509238.0      1.1      0.2                      tree_mess_target_nodes.append(begin_idx + n_nodes)
-   198                                           
-   199    170303    1609723.0      9.5      0.5          n_nodes += len(g.nodes)
-   200                                           
-   201    170303   10759591.0     63.2      3.4          atom_x = torch.stack(atom_feature_list)
-   202    170303    5699077.0     33.5      1.8          g.set_n_repr({'x': atom_x})
-   203    170303     186615.0      1.1      0.1          if len(bond_feature_list) > 0:
-   204    170303   14801332.0     86.9      4.7              bond_x = torch.stack(bond_feature_list)
-   205    170303     209473.0      1.2      0.1              g.set_e_repr({
-   206    170303     113307.0      0.7      0.0                  'x': bond_x,
-   207    170303   17828808.0    104.7      5.7                  'src_x': atom_x.new(len(bond_feature_list), ATOM_FDIM).zero_()
-   208                                                       })
-   209    170303     215091.0      1.3      0.1          cand_graphs.append(g)
-   210                                           
-   211       200        140.0      0.7      0.0      return cand_graphs, tree_mess_source_edges, tree_mess_target_edges, \
-   212       200        133.0      0.7      0.0             tree_mess_target_nodes
+   178   2068468   20647424.0     10.0      6.1          for bond in mol.GetBonds():
+   179   1898165    2661840.0      1.4      0.8              a1 = bond.GetBeginAtom()
+   180   1898165    1821153.0      1.0      0.5              a2 = bond.GetEndAtom()
+   181   1898165    1713325.0      0.9      0.5              begin_idx = a1.GetIdx()
+   182   1898165    1498939.0      0.8      0.4              end_idx = a2.GetIdx()
+   183   1898165   57489086.0     30.3     17.1              features = bond_features(bond)
+   184                                           
+   185   1898165   25276558.0     13.3      7.5              g.add_edge(begin_idx, end_idx)
+   186   1898165    1565800.0      0.8      0.5              bond_feature_list.append(features)
+   187   1898165   18744662.0      9.9      5.6              g.add_edge(end_idx, begin_idx)
+   188   1898165    1451258.0      0.8      0.4              bond_feature_list.append(features)
+   189                                           
+   190   1898165    4004075.0      2.1      1.2              x_nid, y_nid = a1.GetAtomMapNum(), a2.GetAtomMapNum()
+   191                                                       # Tree node ID in the batch
+   192   1898165    6225253.0      3.3      1.9              x_bid = mol_tree.nodes[x_nid - 1]['idx'] if x_nid > 0 else -1
+   193   1898165    4595349.0      2.4      1.4              y_bid = mol_tree.nodes[y_nid - 1]['idx'] if y_nid > 0 else -1
+   194   1898165    1459249.0      0.8      0.4              if x_bid >= 0 and y_bid >= 0 and x_bid != y_bid:
+   195    449880    3808273.0      8.5      1.1                  if (x_bid, y_bid) in mol_tree_batch.edge_list:
+   196    447940     328957.0      0.7      0.1                      tree_mess_target_edges.append(
+   197    447940     473474.0      1.1      0.1                              (begin_idx + n_nodes, end_idx + n_nodes))
+   198    447940     380579.0      0.8      0.1                      tree_mess_source_edges.append((x_bid, y_bid))
+   199    447940     355760.0      0.8      0.1                      tree_mess_target_nodes.append(end_idx + n_nodes)
+   200    449880    2724152.0      6.1      0.8                  if (y_bid, x_bid) in mol_tree_batch.edge_list:
+   201    447940     295393.0      0.7      0.1                      tree_mess_target_edges.append(
+   202    447940     398914.0      0.9      0.1                              (end_idx + n_nodes, begin_idx + n_nodes))
+   203    447940     484661.0      1.1      0.1                      tree_mess_source_edges.append((y_bid, x_bid))
+   204    447940     830868.0      1.9      0.2                      tree_mess_target_nodes.append(begin_idx + n_nodes)
+   205                                           
+   206    170303    1769655.0     10.4      0.5          n_nodes += len(g.nodes)
+   207                                           
+   208    170303   11472173.0     67.4      3.4          atom_x = torch.stack(atom_feature_list)
+   209    170303    5586762.0     32.8      1.7          g.set_n_repr({'x': atom_x})
+   210    170303     184766.0      1.1      0.1          if len(bond_feature_list) > 0:
+   211    170303   15522144.0     91.1      4.6              bond_x = torch.stack(bond_feature_list)
+   212    170303     210131.0      1.2      0.1              g.set_e_repr({
+   213    170303     115525.0      0.7      0.0                  'x': bond_x,
+   214    170303   18948341.0    111.3      5.6                  'src_x': atom_x.new(len(bond_feature_list), ATOM_FDIM).zero_()
+   215                                                       })
+   216    170303     215152.0      1.3      0.1          cand_graphs.append(g)
+   217                                           
+   218       200        127.0      0.6      0.0      return cand_graphs, tree_mess_source_edges, tree_mess_target_edges, \
+   219       200        150.0      0.8      0.0             tree_mess_target_nodes
 
-Total time: 919.105 s
+Total time: 956.766 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtmpn.py
-Function: forward at line 299
+Function: forward at line 311
 
 Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
-   299                                               @profile
-   300                                               def forward(self, cand_batch, mol_tree_batch):
-   301                                                   cand_graphs, tree_mess_src_edges, tree_mess_tgt_edges, tree_mess_tgt_nodes = \
-   302       200  342672127.0 1713360.6     37.3                  mol2dgl(cand_batch, mol_tree_batch)
-   303       200   86077113.0 430385.6      9.4          cand_graphs = batch(cand_graphs)
-   304       200  447173626.0 2235868.1     48.7          cand_line_graph = line_graph(cand_graphs, no_backtracking=True)
-   305                                           
-   306       200        613.0      3.1      0.0          cand_graphs = self.run(
-   307       200        142.0      0.7      0.0                  cand_graphs, cand_line_graph, tree_mess_src_edges, tree_mess_tgt_edges,
-   308       200   13065207.0  65326.0      1.4                  tree_mess_tgt_nodes, mol_tree_batch)
-   309                                           
-   310       200   22672731.0 113363.7      2.5          cand_graphs = unbatch(cand_graphs)
-   311       200    7443044.0  37215.2      0.8          g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in cand_graphs], 0)
-   312                                           
-   313       200        296.0      1.5      0.0          return g_repr
+   311                                               @profile
+   312                                               def forward(self, cand_batch, mol_tree_batch):
+   313                                                   cand_graphs, tree_mess_src_edges, tree_mess_tgt_edges, tree_mess_tgt_nodes = \
+   314       200  364405792.0 1822029.0     38.1                  mol2dgl(cand_batch, mol_tree_batch)
+   315                                           
+   316       200        196.0      1.0      0.0          n_samples = len(cand_graphs)
+   317                                           
+   318       200   87862025.0 439310.1      9.2          cand_graphs = batch(cand_graphs)
+   319       200  458366418.0 2291832.1     47.9          cand_line_graph = line_graph(cand_graphs, no_backtracking=True)
+   320                                           
+   321       200       2030.0     10.2      0.0          n_nodes = len(cand_graphs.nodes)
+   322       200    2021621.0  10108.1      0.2          n_edges = len(cand_graphs.edges)
+   323                                           
+   324       200        466.0      2.3      0.0          cand_graphs = self.run(
+   325       200        134.0      0.7      0.0                  cand_graphs, cand_line_graph, tree_mess_src_edges, tree_mess_tgt_edges,
+   326       200   13552554.0  67762.8      1.4                  tree_mess_tgt_nodes, mol_tree_batch)
+   327                                           
+   328       200   22713553.0 113567.8      2.4          cand_graphs = unbatch(cand_graphs)
+   329       200    7834465.0  39172.3      0.8          g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in cand_graphs], 0)
+   330                                           
+   331       200       3553.0     17.8      0.0          self.n_samples_total += n_samples
+   332       200       1195.0      6.0      0.0          self.n_nodes_total += n_nodes
+   333       200        946.0      4.7      0.0          self.n_edges_total += n_edges
+   334       200        889.0      4.4      0.0          self.n_passes += 1
+   335                                           
+   336       200        111.0      0.6      0.0          return g_repr
 
-Total time: 13.0499 s
+Total time: 13.5364 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtmpn.py
-Function: run at line 315
+Function: run at line 338
 
 Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
-   315                                               @profile
-   316                                               def run(self, cand_graphs, cand_line_graph, tree_mess_src_edges, tree_mess_tgt_edges,
-   317                                                       tree_mess_tgt_nodes, mol_tree_batch):
-   318       200       1516.0      7.6      0.0          n_nodes = len(cand_graphs.nodes)
-   319                                           
-   320       200        265.0      1.3      0.0          cand_graphs.update_edge(
-   321                                                       #*zip(*cand_graphs.edge_list),
-   322       200        233.0      1.2      0.0              edge_func=lambda src, dst, edge: {'src_x': src['x']},
-   323       200    1989571.0   9947.9     15.2              batchable=True,
-   324                                                   )
-   325                                           
-   326       200       3762.0     18.8      0.0          bond_features = cand_line_graph.get_n_repr()['x']
-   327       200       2372.0     11.9      0.0          source_features = cand_line_graph.get_n_repr()['src_x']
-   328       200      14439.0     72.2      0.1          features = torch.cat([source_features, bond_features], 1)
-   329       200      14027.0     70.1      0.1          msg_input = self.W_i(features)
-   330       200        297.0      1.5      0.0          cand_line_graph.set_n_repr({
-   331       200        183.0      0.9      0.0              'msg_input': msg_input,
-   332       200       4671.0     23.4      0.0              'msg': torch.relu(msg_input),
-   333       200      13047.0     65.2      0.1              'accum_msg': torch.zeros_like(msg_input),
-   334                                                   })
-   335       200       4699.0     23.5      0.0          zero_node_state = bond_features.new(n_nodes, self.hidden_size).zero_()
-   336       200        266.0      1.3      0.0          cand_graphs.set_n_repr({
-   337       200       4068.0     20.3      0.0              'm': zero_node_state.clone(),
-   338       200       8549.0     42.7      0.1              'h': zero_node_state.clone(),
-   339                                                   })
-   340                                           
-   341                                                   # TODO: context
-   342       200        232.0      1.2      0.0          if PAPER:
-   343                                                       cand_graphs.set_e_repr({
-   344                                                           'alpha': cuda(torch.zeros(len(cand_graphs.edge_list), self.hidden_size))
-   345                                                       })
-   346                                           
-   347                                                       alpha = mol_tree_batch.get_e_repr(*zip(*tree_mess_src_edges))['m']
-   348                                                       cand_graphs.set_e_repr({'alpha': alpha}, *zip(*tree_mess_tgt_edges))
-   349                                                   else:
-   350       200     859107.0   4295.5      6.6              alpha = mol_tree_batch.get_e_repr(*zip(*tree_mess_src_edges))['m']
-   351       200      17213.0     86.1      0.1              node_idx = (torch.LongTensor(tree_mess_tgt_nodes)
-   352       200       8575.0     42.9      0.1                          .to(device=zero_node_state.device)[:, None]
-   353       200       1947.0      9.7      0.0                          .expand_as(alpha))
-   354       200      11031.0     55.2      0.1              node_alpha = zero_node_state.clone().scatter_add(0, node_idx, alpha)
-   355       200       5998.0     30.0      0.0              cand_graphs.set_n_repr({'alpha': node_alpha})
-   356       200        248.0      1.2      0.0              cand_graphs.update_edge(
-   357                                                           #*zip(*cand_graphs.edge_list),
-   358       200        238.0      1.2      0.0                  edge_func=lambda src, dst, edge: {'alpha': src['alpha']},
-   359       200      22768.0    113.8      0.2                  batchable=True,
-   360                                                       )
-   361                                           
-   362       600       1470.0      2.5      0.0          for i in range(self.depth - 1):
-   363       400        503.0      1.3      0.0              cand_line_graph.update_all(
-   364       400        406.0      1.0      0.0                  mpn_loopy_bp_msg,
-   365       400        376.0      0.9      0.0                  mpn_loopy_bp_reduce,
-   366       400       2287.0      5.7      0.0                  self.loopy_bp_updater,
-   367       400    3315545.0   8288.9     25.4                  True
-   368                                                       )
+   338                                               @profile
+   339                                               def run(self, cand_graphs, cand_line_graph, tree_mess_src_edges, tree_mess_tgt_edges,
+   340                                                       tree_mess_tgt_nodes, mol_tree_batch):
+   341       200       1380.0      6.9      0.0          n_nodes = len(cand_graphs.nodes)
+   342                                           
+   343       200        260.0      1.3      0.0          cand_graphs.update_edge(
+   344                                                       #*zip(*cand_graphs.edge_list),
+   345       200        265.0      1.3      0.0              edge_func=lambda src, dst, edge: {'src_x': src['x']},
+   346       200    2308857.0  11544.3     17.1              batchable=True,
+   347                                                   )
+   348                                           
+   349       200       3844.0     19.2      0.0          bond_features = cand_line_graph.get_n_repr()['x']
+   350       200       2413.0     12.1      0.0          source_features = cand_line_graph.get_n_repr()['src_x']
+   351       200      15666.0     78.3      0.1          features = torch.cat([source_features, bond_features], 1)
+   352       200      16929.0     84.6      0.1          msg_input = self.W_i(features)
+   353       200        301.0      1.5      0.0          cand_line_graph.set_n_repr({
+   354       200        185.0      0.9      0.0              'msg_input': msg_input,
+   355       200       5079.0     25.4      0.0              'msg': torch.relu(msg_input),
+   356       200      13694.0     68.5      0.1              'accum_msg': torch.zeros_like(msg_input),
+   357                                                   })
+   358       200       5049.0     25.2      0.0          zero_node_state = bond_features.new(n_nodes, self.hidden_size).zero_()
+   359       200        326.0      1.6      0.0          cand_graphs.set_n_repr({
+   360       200       4321.0     21.6      0.0              'm': zero_node_state.clone(),
+   361       200       9060.0     45.3      0.1              'h': zero_node_state.clone(),
+   362                                                   })
+   363                                           
+   364                                                   # TODO: context
+   365       200        247.0      1.2      0.0          if PAPER:
+   366                                                       cand_graphs.set_e_repr({
+   367                                                           'alpha': cuda(torch.zeros(len(cand_graphs.edge_list), self.hidden_size))
+   368                                                       })
    369                                           
-   370       200        264.0      1.3      0.0          cand_graphs.update_all(
-   371       200        209.0      1.0      0.0              mpn_gather_msg,
-   372       200        212.0      1.1      0.0              mpn_gather_reduce,
-   373       200        982.0      4.9      0.0              self.gather_updater,
-   374       200    6737924.0  33689.6     51.6              True
-   375                                                   )
-   376                                           
-   377       200        366.0      1.8      0.0          return cand_graphs
+   370                                                       alpha = mol_tree_batch.get_e_repr(*zip(*tree_mess_src_edges))['m']
+   371                                                       cand_graphs.set_e_repr({'alpha': alpha}, *zip(*tree_mess_tgt_edges))
+   372                                                   else:
+   373       200     729431.0   3647.2      5.4              alpha = mol_tree_batch.get_e_repr(*zip(*tree_mess_src_edges))['m']
+   374       200      17862.0     89.3      0.1              node_idx = (torch.LongTensor(tree_mess_tgt_nodes)
+   375       200       9758.0     48.8      0.1                          .to(device=zero_node_state.device)[:, None]
+   376       200       2010.0     10.1      0.0                          .expand_as(alpha))
+   377       200      11706.0     58.5      0.1              node_alpha = zero_node_state.clone().scatter_add(0, node_idx, alpha)
+   378       200       6493.0     32.5      0.0              cand_graphs.set_n_repr({'alpha': node_alpha})
+   379       200        253.0      1.3      0.0              cand_graphs.update_edge(
+   380                                                           #*zip(*cand_graphs.edge_list),
+   381       200        264.0      1.3      0.0                  edge_func=lambda src, dst, edge: {'alpha': src['alpha']},
+   382       200      23569.0    117.8      0.2                  batchable=True,
+   383                                                       )
+   384                                           
+   385       600       1569.0      2.6      0.0          for i in range(self.depth - 1):
+   386       400        517.0      1.3      0.0              cand_line_graph.update_all(
+   387       400        414.0      1.0      0.0                  mpn_loopy_bp_msg,
+   388       400        426.0      1.1      0.0                  mpn_loopy_bp_reduce,
+   389       400       2316.0      5.8      0.0                  self.loopy_bp_updater,
+   390       400    3450709.0   8626.8     25.5                  True
+   391                                                       )
+   392                                           
+   393       200        384.0      1.9      0.0          cand_graphs.update_all(
+   394       200        204.0      1.0      0.0              mpn_gather_msg,
+   395       200        194.0      1.0      0.0              mpn_gather_reduce,
+   396       200        962.0      4.8      0.0              self.gather_updater,
+   397       200    6889126.0  34445.6     50.9              True
+   398                                                   )
+   399                                           
+   400       200        387.0      1.9      0.0          return cand_graphs
 
 Total time: 0 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_dec.py
@@ -412,7 +435,7 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
    191                                           
    192                                                   return pred_loss, stop_loss, pred_acc.data[0], stop_acc.data[0]
 
-Total time: 53.2786 s
+Total time: 57.4714 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_dec.py
 Function: forward at line 398
 
@@ -424,13 +447,13 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
    401                                                   The training procedure which computes the prediction loss given the
    402                                                   ground truth tree
    403                                                   '''
-   404       200    2206276.0  11031.4      4.1          mol_tree_batch = batch(mol_trees)
-   405       200   12261682.0  61308.4     23.0          mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
-   406       200        251.0      1.3      0.0          n_trees = len(mol_trees)
+   404       200    2264746.0  11323.7      3.9          mol_tree_batch = batch(mol_trees)
+   405       200   13945427.0  69727.1     24.3          mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
+   406       200        348.0      1.7      0.0          n_trees = len(mol_trees)
    407                                           
-   408       200   38810389.0 194051.9     72.8          return self.run(mol_tree_batch, mol_tree_batch_lg, n_trees, tree_vec)
+   408       200   41260857.0 206304.3     71.8          return self.run(mol_tree_batch, mol_tree_batch_lg, n_trees, tree_vec)
 
-Total time: 38.4615 s
+Total time: 40.8961 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_dec.py
 Function: run at line 410
 
@@ -438,106 +461,106 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
    410                                               @profile
    411                                               def run(self, mol_tree_batch, mol_tree_batch_lg, n_trees, tree_vec):
-   412       200        683.0      3.4      0.0          root_ids = mol_tree_batch.node_offset[:-1]
-   413       200        928.0      4.6      0.0          n_nodes = len(mol_tree_batch.nodes)
-   414       200        347.0      1.7      0.0          edge_list = mol_tree_batch.edge_list
-   415       200        254.0      1.3      0.0          n_edges = len(edge_list)
+   412       200       1004.0      5.0      0.0          root_ids = mol_tree_batch.node_offset[:-1]
+   413       200       1094.0      5.5      0.0          n_nodes = len(mol_tree_batch.nodes)
+   414       200        425.0      2.1      0.0          edge_list = mol_tree_batch.edge_list
+   415       200        263.0      1.3      0.0          n_edges = len(edge_list)
    416                                           
-   417       200        255.0      1.3      0.0          mol_tree_batch.set_n_repr({
-   418       200      15603.0     78.0      0.0              'x': self.embedding(mol_tree_batch.get_n_repr()['wid']),
-   419       200      22223.0    111.1      0.1              'h': cuda(torch.zeros(n_nodes, self.hidden_size)),
-   420       200      17128.0     85.6      0.0              'new': cuda(torch.ones(n_nodes).byte()),  # whether it's newly generated node
+   417       200        330.0      1.6      0.0          mol_tree_batch.set_n_repr({
+   418       200      23467.0    117.3      0.1              'x': self.embedding(mol_tree_batch.get_n_repr()['wid']),
+   419       200      28991.0    145.0      0.1              'h': cuda(torch.zeros(n_nodes, self.hidden_size)),
+   420       200      21015.0    105.1      0.1              'new': cuda(torch.ones(n_nodes).byte()),  # whether it's newly generated node
    421                                                   })
    422                                           
-   423       200        334.0      1.7      0.0          mol_tree_batch.set_e_repr({
-   424       200      40493.0    202.5      0.1              's': cuda(torch.zeros(n_edges, self.hidden_size)),
-   425       200      25976.0    129.9      0.1              'm': cuda(torch.zeros(n_edges, self.hidden_size)),
-   426       200      25727.0    128.6      0.1              'r': cuda(torch.zeros(n_edges, self.hidden_size)),
-   427       200      25381.0    126.9      0.1              'z': cuda(torch.zeros(n_edges, self.hidden_size)),
-   428       200      24993.0    125.0      0.1              'src_x': cuda(torch.zeros(n_edges, self.hidden_size)),
-   429       200      24989.0    124.9      0.1              'dst_x': cuda(torch.zeros(n_edges, self.hidden_size)),
-   430       200      24861.0    124.3      0.1              'rm': cuda(torch.zeros(n_edges, self.hidden_size)),
-   431       200      71776.0    358.9      0.2              'accum_rm': cuda(torch.zeros(n_edges, self.hidden_size)),
+   423       200        314.0      1.6      0.0          mol_tree_batch.set_e_repr({
+   424       200      40616.0    203.1      0.1              's': cuda(torch.zeros(n_edges, self.hidden_size)),
+   425       200      25667.0    128.3      0.1              'm': cuda(torch.zeros(n_edges, self.hidden_size)),
+   426       200      25779.0    128.9      0.1              'r': cuda(torch.zeros(n_edges, self.hidden_size)),
+   427       200      25327.0    126.6      0.1              'z': cuda(torch.zeros(n_edges, self.hidden_size)),
+   428       200      24912.0    124.6      0.1              'src_x': cuda(torch.zeros(n_edges, self.hidden_size)),
+   429       200      24990.0    125.0      0.1              'dst_x': cuda(torch.zeros(n_edges, self.hidden_size)),
+   430       200      25027.0    125.1      0.1              'rm': cuda(torch.zeros(n_edges, self.hidden_size)),
+   431       200      81739.0    408.7      0.2              'accum_rm': cuda(torch.zeros(n_edges, self.hidden_size)),
    432                                                   })
    433                                           
-   434       200        361.0      1.8      0.0          mol_tree_batch.update_edge(
+   434       200        389.0      1.9      0.0          mol_tree_batch.update_edge(
    435                                                       #*zip(*edge_list),
-   436       200        311.0      1.6      0.0              edge_func=lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
-   437       200      94098.0    470.5      0.2              batchable=True,
+   436       200        352.0      1.8      0.0              edge_func=lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
+   437       200     116020.0    580.1      0.3              batchable=True,
    438                                                   )
    439                                           
    440                                                   # input tensors for stop prediction (p) and label prediction (q)
-   441       200        365.0      1.8      0.0          p_inputs = []
-   442       200        254.0      1.3      0.0          p_targets = []
-   443       200        245.0      1.2      0.0          q_inputs = []
-   444       200        243.0      1.2      0.0          q_targets = []
+   441       200        387.0      1.9      0.0          p_inputs = []
+   442       200        285.0      1.4      0.0          p_targets = []
+   443       200        274.0      1.4      0.0          q_inputs = []
+   444       200        276.0      1.4      0.0          q_targets = []
    445                                           
    446                                                   # Predict root
-   447       200        280.0      1.4      0.0          mol_tree_batch.pull(
-   448       200        232.0      1.2      0.0              root_ids,
-   449       200        267.0      1.3      0.0              dec_tree_node_msg,
-   450       200        255.0      1.3      0.0              dec_tree_node_reduce,
-   451       200        252.0      1.3      0.0              dec_tree_node_update,
-   452       200     336705.0   1683.5      0.9              batchable=True,
+   447       200        319.0      1.6      0.0          mol_tree_batch.pull(
+   448       200        256.0      1.3      0.0              root_ids,
+   449       200        293.0      1.5      0.0              dec_tree_node_msg,
+   450       200        267.0      1.3      0.0              dec_tree_node_reduce,
+   451       200        286.0      1.4      0.0              dec_tree_node_update,
+   452       200     240121.0   1200.6      0.6              batchable=True,
    453                                                   )
    454                                                   # Extract hidden states and store them for stop/label prediction
-   455       200      15536.0     77.7      0.0          h = mol_tree_batch.get_n_repr(root_ids)['h']
-   456       200      14732.0     73.7      0.0          x = mol_tree_batch.get_n_repr(root_ids)['x']
-   457       200       7377.0     36.9      0.0          p_inputs.append(torch.cat([x, h, tree_vec], 1))
-   458       200        858.0      4.3      0.0          t_set = list(range(len(root_ids)))
-   459       200       5629.0     28.1      0.0          q_inputs.append(torch.cat([h, tree_vec], 1))
-   460       200      15624.0     78.1      0.0          q_targets.append(mol_tree_batch.get_n_repr(root_ids)['wid'])
+   455       200      16777.0     83.9      0.0          h = mol_tree_batch.get_n_repr(root_ids)['h']
+   456       200      15720.0     78.6      0.0          x = mol_tree_batch.get_n_repr(root_ids)['x']
+   457       200       8553.0     42.8      0.0          p_inputs.append(torch.cat([x, h, tree_vec], 1))
+   458       200        982.0      4.9      0.0          t_set = list(range(len(root_ids)))
+   459       200       6008.0     30.0      0.0          q_inputs.append(torch.cat([h, tree_vec], 1))
+   460       200      19012.0     95.1      0.0          q_targets.append(mol_tree_batch.get_n_repr(root_ids)['wid'])
    461                                           
    462                                                   # Traverse the tree and predict on children
-   463      8148    1188548.0    145.9      3.1          for u, v, i, p in dfs_order(mol_tree_batch, root_ids):
-   464      7948      27826.0      3.5      0.1              assert set(t_set).issuperset(i)
-   465      7948      36404.0      4.6      0.1              ip = dict(zip(i, p))
+   463      8132    1144415.0    140.7      2.8          for u, v, i, p in dfs_order(mol_tree_batch, root_ids):
+   464      7932      28599.0      3.6      0.1              assert set(t_set).issuperset(i)
+   465      7932      39395.0      5.0      0.1              ip = dict(zip(i, p))
    466                                                       # TODO: context
-   467      7948     256434.0     32.3      0.7              p_targets.append(cuda(torch.tensor([ip.get(_i, 0) for _i in t_set])))
-   468      7948      17825.0      2.2      0.0              t_set = list(i)
-   469      7948     284154.0     35.8      0.7              eid = mol_tree_batch.get_edge_id(u, v)
-   470      7948      11797.0      1.5      0.0              mol_tree_batch_lg.pull(
-   471      7948       9218.0      1.2      0.0                  eid,
-   472      7948       9859.0      1.2      0.0                  dec_tree_edge_msg,
-   473      7948       9123.0      1.1      0.0                  dec_tree_edge_reduce,
-   474      7948      44855.0      5.6      0.1                  self.dec_tree_edge_update,
-   475      7948   15732649.0   1979.4     40.9                  batchable=True,
+   467      7932     289572.0     36.5      0.7              p_targets.append(cuda(torch.tensor([ip.get(_i, 0) for _i in t_set])))
+   468      7932      19061.0      2.4      0.0              t_set = list(i)
+   469      7932     304775.0     38.4      0.7              eid = mol_tree_batch.get_edge_id(u, v)
+   470      7932      12610.0      1.6      0.0              mol_tree_batch_lg.pull(
+   471      7932       9482.0      1.2      0.0                  eid,
+   472      7932      10129.0      1.3      0.0                  dec_tree_edge_msg,
+   473      7932       9603.0      1.2      0.0                  dec_tree_edge_reduce,
+   474      7932      48763.0      6.1      0.1                  self.dec_tree_edge_update,
+   475      7932   16663287.0   2100.8     40.7                  batchable=True,
    476                                                       )
-   477      7948     614293.0     77.3      1.6              is_new = mol_tree_batch.get_n_repr(v)['new']
-   478      7948      14552.0      1.8      0.0              mol_tree_batch.pull(
-   479      7948       9255.0      1.2      0.0                  v,
-   480      7948      10230.0      1.3      0.0                  dec_tree_node_msg,
-   481      7948       9163.0      1.2      0.0                  dec_tree_node_reduce,
-   482      7948       9296.0      1.2      0.0                  dec_tree_node_update,
-   483      7948   10453469.0   1315.2     27.2                  batchable=True,
+   477      7932     674754.0     85.1      1.6              is_new = mol_tree_batch.get_n_repr(v)['new']
+   478      7932      15610.0      2.0      0.0              mol_tree_batch.pull(
+   479      7932       9676.0      1.2      0.0                  v,
+   480      7932      10910.0      1.4      0.0                  dec_tree_node_msg,
+   481      7932       9598.0      1.2      0.0                  dec_tree_node_reduce,
+   482      7932       9756.0      1.2      0.0                  dec_tree_node_update,
+   483      7932   11333222.0   1428.8     27.7                  batchable=True,
    484                                                       )
    485                                                       # Extract
-   486      7948     593683.0     74.7      1.5              h = mol_tree_batch.get_n_repr(v)['h']
-   487      7948     553703.0     69.7      1.4              x = mol_tree_batch.get_n_repr(v)['x']
-   488      7948    1672402.0    210.4      4.3              p_inputs.append(torch.cat([x, h, tree_vec[t_set]], 1))
+   486      7932     628500.0     79.2      1.5              h = mol_tree_batch.get_n_repr(v)['h']
+   487      7932     591897.0     74.6      1.4              x = mol_tree_batch.get_n_repr(v)['x']
+   488      7932    1783478.0    224.8      4.4              p_inputs.append(torch.cat([x, h, tree_vec[t_set]], 1))
    489                                                       # Only newly generated nodes are needed for label prediction
    490                                                       # NOTE: The following works since the uncomputed messages are zeros.
-   491      7948    4092380.0    514.9     10.6              q_inputs.append(torch.cat([h[is_new], tree_vec[t_set][is_new]], 1))
-   492      7948    1715685.0    215.9      4.5              q_targets.append(mol_tree_batch.get_n_repr(v)['wid'][is_new])
-   493       200       5658.0     28.3      0.0          p_targets.append(cuda(torch.tensor([0 for _ in t_set])))
+   491      7932    4339599.0    547.1     10.6              q_inputs.append(torch.cat([h[is_new], tree_vec[t_set][is_new]], 1))
+   492      7932    1844267.0    232.5      4.5              q_targets.append(mol_tree_batch.get_n_repr(v)['wid'][is_new])
+   493       200       6103.0     30.5      0.0          p_targets.append(cuda(torch.tensor([0 for _ in t_set])))
    494                                           
    495                                                   # Batch compute the stop/label prediction losses
-   496       200      15573.0     77.9      0.0          p_inputs = torch.cat(p_inputs, 0)
-   497       200      12579.0     62.9      0.0          p_targets = torch.cat(p_targets, 0)
-   498       200      42476.0    212.4      0.1          q_inputs = torch.cat(q_inputs, 0)
-   499       200      36650.0    183.2      0.1          q_targets = torch.cat(q_targets, 0)
+   496       200      19400.0     97.0      0.0          p_inputs = torch.cat(p_inputs, 0)
+   497       200      15007.0     75.0      0.0          p_targets = torch.cat(p_targets, 0)
+   498       200      46207.0    231.0      0.1          q_inputs = torch.cat(q_inputs, 0)
+   499       200      39041.0    195.2      0.1          q_targets = torch.cat(q_targets, 0)
    500                                           
-   501       200      25209.0    126.0      0.1          q = self.W_o(torch.relu(self.W(q_inputs)))
-   502       200      21857.0    109.3      0.1          p = self.U_s(torch.relu(self.U(p_inputs)))[:, 0]
+   501       200      26458.0    132.3      0.1          q = self.W_o(torch.relu(self.W(q_inputs)))
+   502       200      22490.0    112.5      0.1          p = self.U_s(torch.relu(self.U(p_inputs)))[:, 0]
    503                                           
-   504       200        399.0      2.0      0.0          p_loss = F.binary_cross_entropy_with_logits(
-   505       200      48620.0    243.1      0.1              p, p_targets.float(), size_average=False
-   506       200       3618.0     18.1      0.0          ) / n_trees
-   507       200      14765.0     73.8      0.0          q_loss = F.cross_entropy(q, q_targets, size_average=False) / n_trees
-   508       200      22781.0    113.9      0.1          p_acc = ((p > 0).long() == p_targets).sum().float() / p_targets.shape[0]
-   509       200      18653.0     93.3      0.0          q_acc = (q.max(1)[1] == q_targets).float().sum() / q_targets.shape[0]
+   504       200        432.0      2.2      0.0          p_loss = F.binary_cross_entropy_with_logits(
+   505       200      50491.0    252.5      0.1              p, p_targets.float(), size_average=False
+   506       200       3703.0     18.5      0.0          ) / n_trees
+   507       200      14847.0     74.2      0.0          q_loss = F.cross_entropy(q, q_targets, size_average=False) / n_trees
+   508       200      23808.0    119.0      0.1          p_acc = ((p > 0).long() == p_targets).sum().float() / p_targets.shape[0]
+   509       200      19266.0     96.3      0.0          q_acc = (q.max(1)[1] == q_targets).float().sum() / q_targets.shape[0]
    510                                           
-   511       200        325.0      1.6      0.0          return q_loss, p_loss, q_acc, p_acc
+   511       200        322.0      1.6      0.0          return q_loss, p_loss, q_acc, p_acc
 
 Total time: 0 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_enc.py
@@ -591,7 +614,7 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
     76                                           
     77                                                   return h, root_vecs
 
-Total time: 28.0681 s
+Total time: 31.5349 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_enc.py
 Function: forward at line 201
 
@@ -599,14 +622,14 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
    201                                               @profile
    202                                               def forward(self, mol_trees):
-   203       200    2511495.0  12557.5      8.9          mol_tree_batch = batch(mol_trees)
+   203       200    3288119.0  16440.6     10.4          mol_tree_batch = batch(mol_trees)
    204                                                   
    205                                                   # Build line graph to prepare for belief propagation
-   206       200   12522716.0  62613.6     44.6          mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
+   206       200   14085128.0  70425.6     44.7          mol_tree_batch_lg = line_graph(mol_tree_batch, no_backtracking=True)
    207                                           
-   208       200   13033892.0  65169.5     46.4          return self.run(mol_tree_batch, mol_tree_batch_lg)
+   208       200   14161639.0  70808.2     44.9          return self.run(mol_tree_batch, mol_tree_batch_lg)
 
-Total time: 12.9835 s
+Total time: 14.1078 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_enc.py
 Function: run at line 210
 
@@ -616,36 +639,36 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
    211                                               def run(self, mol_tree_batch, mol_tree_batch_lg):
    212                                                   # Since tree roots are designated to 0.  In the batched graph we can
    213                                                   # simply find the corresponding node ID by looking at node_offset
-   214       200        567.0      2.8      0.0          root_ids = mol_tree_batch.node_offset[:-1]
-   215       200        838.0      4.2      0.0          n_nodes = len(mol_tree_batch.nodes)
-   216       200        261.0      1.3      0.0          edge_list = mol_tree_batch.edge_list
-   217       200        167.0      0.8      0.0          n_edges = len(edge_list)
+   214       200        922.0      4.6      0.0          root_ids = mol_tree_batch.node_offset[:-1]
+   215       200       1049.0      5.2      0.0          n_nodes = len(mol_tree_batch.nodes)
+   216       200        348.0      1.7      0.0          edge_list = mol_tree_batch.edge_list
+   217       200        180.0      0.9      0.0          n_edges = len(edge_list)
    218                                           
    219                                                   # Assign structure embeddings to tree nodes
-   220       200        168.0      0.8      0.0          mol_tree_batch.set_n_repr({
-   221       200      15382.0     76.9      0.1              'x': self.embedding(mol_tree_batch.get_n_repr()['wid']),
-   222       200      29951.0    149.8      0.2              'h': cuda(torch.zeros(n_nodes, self.hidden_size)),
+   220       200        198.0      1.0      0.0          mol_tree_batch.set_n_repr({
+   221       200      23585.0    117.9      0.2              'x': self.embedding(mol_tree_batch.get_n_repr()['wid']),
+   222       200      36707.0    183.5      0.3              'h': cuda(torch.zeros(n_nodes, self.hidden_size)),
    223                                                   })
    224                                           
    225                                                   # Initialize the intermediate variables according to Eq (4)-(8).
    226                                                   # Also initialize the src_x and dst_x fields.
    227                                                   # TODO: context?
-   228       200        214.0      1.1      0.0          mol_tree_batch.set_e_repr({
-   229       200      41469.0    207.3      0.3              's': cuda(torch.zeros(n_edges, self.hidden_size)),
-   230       200      26276.0    131.4      0.2              'm': cuda(torch.zeros(n_edges, self.hidden_size)),
-   231       200      25783.0    128.9      0.2              'r': cuda(torch.zeros(n_edges, self.hidden_size)),
-   232       200      25520.0    127.6      0.2              'z': cuda(torch.zeros(n_edges, self.hidden_size)),
-   233       200      25221.0    126.1      0.2              'src_x': cuda(torch.zeros(n_edges, self.hidden_size)),
-   234       200      24969.0    124.8      0.2              'dst_x': cuda(torch.zeros(n_edges, self.hidden_size)),
-   235       200      25109.0    125.5      0.2              'rm': cuda(torch.zeros(n_edges, self.hidden_size)),
-   236       200      71800.0    359.0      0.6              'accum_rm': cuda(torch.zeros(n_edges, self.hidden_size)),
+   228       200        235.0      1.2      0.0          mol_tree_batch.set_e_repr({
+   229       200      40792.0    204.0      0.3              's': cuda(torch.zeros(n_edges, self.hidden_size)),
+   230       200      25885.0    129.4      0.2              'm': cuda(torch.zeros(n_edges, self.hidden_size)),
+   231       200      25958.0    129.8      0.2              'r': cuda(torch.zeros(n_edges, self.hidden_size)),
+   232       200      25563.0    127.8      0.2              'z': cuda(torch.zeros(n_edges, self.hidden_size)),
+   233       200      25450.0    127.2      0.2              'src_x': cuda(torch.zeros(n_edges, self.hidden_size)),
+   234       200      25122.0    125.6      0.2              'dst_x': cuda(torch.zeros(n_edges, self.hidden_size)),
+   235       200      25157.0    125.8      0.2              'rm': cuda(torch.zeros(n_edges, self.hidden_size)),
+   236       200      81562.0    407.8      0.6              'accum_rm': cuda(torch.zeros(n_edges, self.hidden_size)),
    237                                                   })
    238                                           
    239                                                   # Send the source/destination node features to edges
-   240       200        252.0      1.3      0.0          mol_tree_batch.update_edge(
+   240       200        273.0      1.4      0.0          mol_tree_batch.update_edge(
    241                                                       #*zip(*edge_list),
-   242       200        215.0      1.1      0.0              edge_func=lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
-   243       200      91896.0    459.5      0.7              batchable=True,
+   242       200        251.0      1.3      0.0              edge_func=lambda src, dst, edge: {'src_x': src['x'], 'dst_x': dst['x']},
+   243       200     286573.0   1432.9      2.0              batchable=True,
    244                                                   )
    245                                           
    246                                                   # Message passing
@@ -653,25 +676,25 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
    248                                                   # messages, and the uncomputed messages are zero vectors.  Essentially,
    249                                                   # we can always compute s_ij as the sum of incoming m_ij, no matter
    250                                                   # if m_ij is actually computed or not.
-   251      5928     522467.0     88.1      4.0          for u, v in level_order(mol_tree_batch, root_ids):
-   252      5728     218900.0     38.2      1.7              eid = mol_tree_batch.get_edge_id(u, v)
-   253      5728       5836.0      1.0      0.0              mol_tree_batch_lg.pull(
-   254      5728       4252.0      0.7      0.0                  eid,
-   255      5728       4403.0      0.8      0.0                  enc_tree_msg,
-   256      5728       4095.0      0.7      0.0                  enc_tree_reduce,
-   257      5728      28763.0      5.0      0.2                  self.enc_tree_update,
-   258      5728   11303143.0   1973.3     87.1                  batchable=True,
+   251      5910     853446.0    144.4      6.0          for u, v in level_order(mol_tree_batch, root_ids):
+   252      5710     234504.0     41.1      1.7              eid = mol_tree_batch.get_edge_id(u, v)
+   253      5710       6311.0      1.1      0.0              mol_tree_batch_lg.pull(
+   254      5710       4458.0      0.8      0.0                  eid,
+   255      5710       4634.0      0.8      0.0                  enc_tree_msg,
+   256      5710       4460.0      0.8      0.0                  enc_tree_reduce,
+   257      5710      29681.0      5.2      0.2                  self.enc_tree_update,
+   258      5710   11829037.0   2071.6     83.8                  batchable=True,
    259                                                       )
    260                                           
    261                                                   # Readout
-   262       200        223.0      1.1      0.0          mol_tree_batch.update_all(
-   263       200        180.0      0.9      0.0              enc_tree_gather_msg,
-   264       200        149.0      0.7      0.0              enc_tree_gather_reduce,
-   265       200        999.0      5.0      0.0              self.enc_tree_gather_update,
-   266       200     467556.0   2337.8      3.6              batchable=True,
+   262       200        349.0      1.7      0.0          mol_tree_batch.update_all(
+   263       200        190.0      0.9      0.0              enc_tree_gather_msg,
+   264       200        182.0      0.9      0.0              enc_tree_gather_reduce,
+   265       200       1034.0      5.2      0.0              self.enc_tree_gather_update,
+   266       200     495753.0   2478.8      3.5              batchable=True,
    267                                                   )
    268                                           
-   269       200      16239.0     81.2      0.1          root_vecs = mol_tree_batch.get_n_repr(root_ids)['h']
+   269       200      17726.0     88.6      0.1          root_vecs = mol_tree_batch.get_n_repr(root_ids)['h']
    270                                           
    271       200        235.0      1.2      0.0          return mol_tree_batch, root_vecs
 
@@ -815,171 +838,177 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
    185                                                   all_loss = sum(all_loss) / len(labels)
    186                                                   return all_loss, acc * 1.0 / len(labels)
 
-Total time: 74.4692 s
+Total time: 80.4297 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_vae.py
-Function: encode at line 353
+Function: encode at line 358
 
 Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
-   353                                               @profile
-   354                                               def encode(self, mol_batch):
-   355       200     435932.0   2179.7      0.6          dgl_set_batch_nodeID(mol_batch, self.vocab)
-   356                                           
-   357       200       1250.0      6.2      0.0          smiles_batch = [mol_tree.smiles for mol_tree in mol_batch]
-   358       200   45959962.0 229799.8     61.7          mol_vec = self.mpn(mol2dgl(smiles_batch))
-   359                                                   # mol_batch is a junction tree
-   360       200   28071914.0 140359.6     37.7          mol_tree_batch, tree_vec = self.jtnn(mol_batch)
+   358                                               @profile
+   359                                               def encode(self, mol_batch):
+   360       200     449275.0   2246.4      0.6          dgl_set_batch_nodeID(mol_batch, self.vocab)
    361                                           
-   362       200        127.0      0.6      0.0          return mol_tree_batch, tree_vec, mol_vec
-
-Total time: 1064.5 s
-File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_vae.py
-Function: forward at line 364
-
-Line #      Hits         Time  Per Hit   % Time  Line Contents
-==============================================================
-   364                                               @profile
-   365                                               def forward(self, mol_batch, beta=0, e1=None, e2=None):
-   366       200        274.0      1.4      0.0          batch_size = len(mol_batch)
+   362       200       1461.0      7.3      0.0          smiles_batch = [mol_tree.smiles for mol_tree in mol_batch]
+   363       200   15759899.0  78799.5     19.6          mol_graphs = mol2dgl(smiles_batch)
+   364       200   32518687.0 162593.4     40.4          mol_vec = self.mpn(mol_graphs)
+   365                                                   # mol_batch is a junction tree
+   366       200   31539223.0 157696.1     39.2          mol_tree_batch, tree_vec = self.jtnn(mol_batch)
    367                                           
-   368       200   74471324.0 372356.6      7.0          mol_tree_batch, tree_vec, mol_vec = self.encode(mol_batch)
-   369                                           
-   370       200      10702.0     53.5      0.0          tree_mean = self.T_mean(tree_vec)
-   371       200      14504.0     72.5      0.0          tree_log_var = -torch.abs(self.T_var(tree_vec))
-   372       200       9002.0     45.0      0.0          mol_mean = self.G_mean(mol_vec)
-   373       200      13203.0     66.0      0.0          mol_log_var = -torch.abs(self.G_var(mol_vec))
-   374                                           
-   375       200       2423.0     12.1      0.0          self.tree_mean = tree_mean
-   376       200       1437.0      7.2      0.0          self.tree_log_var = tree_log_var
-   377       200       1277.0      6.4      0.0          self.mol_mean = mol_mean
-   378       200       1267.0      6.3      0.0          self.mol_log_var = mol_log_var
-   379                                           
-   380       200       6333.0     31.7      0.0          z_mean = torch.cat([tree_mean, mol_mean], dim=1)
-   381       200       4930.0     24.6      0.0          z_log_var = torch.cat([tree_log_var, mol_log_var], dim=1)
-   382       200      28840.0    144.2      0.0          kl_loss = -0.5 * torch.sum(1.0 + z_log_var - z_mean * z_mean - torch.exp(z_log_var)) / batch_size
-   383                                           
-   384       200       2089.0     10.4      0.0          self.z_mean = z_mean
-   385       200       1363.0      6.8      0.0          self.z_log_var = z_log_var
-   386                                           
-   387       200       7461.0     37.3      0.0          epsilon = cuda(torch.randn(batch_size, self.latent_size // 2)) if e1 is None else e1
-   388       200      14995.0     75.0      0.0          tree_vec = tree_mean + torch.exp(tree_log_var // 2) * epsilon
-   389       200       6066.0     30.3      0.0          epsilon = cuda(torch.randn(batch_size, self.latent_size // 2)) if e2 is None else e2
-   390       200      13879.0     69.4      0.0          mol_vec = mol_mean + torch.exp(mol_log_var // 2) * epsilon
-   391                                           
-   392       200       2031.0     10.2      0.0          self.tree_vec = tree_vec
-   393       200       1287.0      6.4      0.0          self.mol_vec = mol_vec
+   368       200      14413.0     72.1      0.0          self.n_nodes_total += sum(len(g.nodes) for g in mol_graphs)
+   369       200     134264.0    671.3      0.2          self.n_edges_total += sum(len(g.edges) for g in mol_graphs)
+   370       200      11365.0     56.8      0.0          self.n_tree_nodes_total += sum(len(t.nodes) for t in mol_batch)
+   371       200        995.0      5.0      0.0          self.n_passes += 1
+   372                                           
+   373       200        168.0      0.8      0.0          return mol_tree_batch, tree_vec, mol_vec
+
+Total time: 1113.18 s
+File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_vae.py
+Function: forward at line 375
+
+Line #      Hits         Time  Per Hit   % Time  Line Contents
+==============================================================
+   375                                               @profile
+   376                                               def forward(self, mol_batch, beta=0, e1=None, e2=None):
+   377       200        293.0      1.5      0.0          batch_size = len(mol_batch)
+   378                                           
+   379       200   80433992.0 402170.0      7.2          mol_tree_batch, tree_vec, mol_vec = self.encode(mol_batch)
+   380                                           
+   381       200      11855.0     59.3      0.0          tree_mean = self.T_mean(tree_vec)
+   382       200      15371.0     76.9      0.0          tree_log_var = -torch.abs(self.T_var(tree_vec))
+   383       200       9272.0     46.4      0.0          mol_mean = self.G_mean(mol_vec)
+   384       200      13764.0     68.8      0.0          mol_log_var = -torch.abs(self.G_var(mol_vec))
+   385                                           
+   386       200       2152.0     10.8      0.0          self.tree_mean = tree_mean
+   387       200       1503.0      7.5      0.0          self.tree_log_var = tree_log_var
+   388       200       1366.0      6.8      0.0          self.mol_mean = mol_mean
+   389       200       1258.0      6.3      0.0          self.mol_log_var = mol_log_var
+   390                                           
+   391       200       6705.0     33.5      0.0          z_mean = torch.cat([tree_mean, mol_mean], dim=1)
+   392       200       5099.0     25.5      0.0          z_log_var = torch.cat([tree_log_var, mol_log_var], dim=1)
+   393       200      31047.0    155.2      0.0          kl_loss = -0.5 * torch.sum(1.0 + z_log_var - z_mean * z_mean - torch.exp(z_log_var)) / batch_size
    394                                           
-   395       200   53282951.0 266414.8      5.0          word_loss, topo_loss, word_acc, topo_acc = self.decoder(mol_batch, tree_vec)
-   396       200  923154534.0 4615772.7     86.7          assm_loss, assm_acc = self.assm(mol_batch, mol_tree_batch, mol_vec)
-   397       200   13421951.0  67109.8      1.3          stereo_loss, stereo_acc = self.stereo(mol_batch, mol_vec)
-   398                                           
-   399       200       2529.0     12.6      0.0          self.word_loss_v = word_loss
-   400       200       1404.0      7.0      0.0          self.topo_loss_v = topo_loss
-   401       200       1364.0      6.8      0.0          self.assm_loss_v = assm_loss
-   402       200       1273.0      6.4      0.0          self.stereo_loss_v = stereo_loss
-   403                                           
-   404       200       6871.0     34.4      0.0          all_vec = torch.cat([tree_vec, mol_vec], dim=1)
-   405       200      14902.0     74.5      0.0          loss = word_loss + topo_loss + assm_loss + 2 * stereo_loss + beta * kl_loss
-   406                                           
-   407       200       2139.0     10.7      0.0          self.all_vec = all_vec
-   408                                           
-   409       200        193.0      1.0      0.0          return loss, kl_loss, word_acc, topo_acc, assm_acc, stereo_acc
+   395       200       2171.0     10.9      0.0          self.z_mean = z_mean
+   396       200       1334.0      6.7      0.0          self.z_log_var = z_log_var
+   397                                           
+   398       200       8445.0     42.2      0.0          epsilon = cuda(torch.randn(batch_size, self.latent_size // 2)) if e1 is None else e1
+   399       200      15545.0     77.7      0.0          tree_vec = tree_mean + torch.exp(tree_log_var // 2) * epsilon
+   400       200       6557.0     32.8      0.0          epsilon = cuda(torch.randn(batch_size, self.latent_size // 2)) if e2 is None else e2
+   401       200      14166.0     70.8      0.0          mol_vec = mol_mean + torch.exp(mol_log_var // 2) * epsilon
+   402                                           
+   403       200       2078.0     10.4      0.0          self.tree_vec = tree_vec
+   404       200       1342.0      6.7      0.0          self.mol_vec = mol_vec
+   405                                           
+   406       200   57475924.0 287379.6      5.2          word_loss, topo_loss, word_acc, topo_acc = self.decoder(mol_batch, tree_vec)
+   407       200  961052314.0 4805261.6     86.3          assm_loss, assm_acc = self.assm(mol_batch, mol_tree_batch, mol_vec)
+   408       200   14030664.0  70153.3      1.3          stereo_loss, stereo_acc = self.stereo(mol_batch, mol_vec)
+   409                                           
+   410       200       2449.0     12.2      0.0          self.word_loss_v = word_loss
+   411       200       1418.0      7.1      0.0          self.topo_loss_v = topo_loss
+   412       200       1377.0      6.9      0.0          self.assm_loss_v = assm_loss
+   413       200       1401.0      7.0      0.0          self.stereo_loss_v = stereo_loss
+   414                                           
+   415       200       7355.0     36.8      0.0          all_vec = torch.cat([tree_vec, mol_vec], dim=1)
+   416       200      15170.0     75.8      0.0          loss = word_loss + topo_loss + assm_loss + 2 * stereo_loss + beta * kl_loss
+   417                                           
+   418       200       2173.0     10.9      0.0          self.all_vec = all_vec
+   419                                           
+   420       200        203.0      1.0      0.0          return loss, kl_loss, word_acc, topo_acc, assm_acc, stereo_acc
 
-Total time: 922.774 s
+Total time: 960.66 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_vae.py
-Function: assm at line 411
+Function: assm at line 422
 
 Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
-   411                                               @profile
-   412                                               def assm(self, mol_batch, mol_tree_batch, mol_vec):
-   413       200        263.0      1.3      0.0          cands = []
-   414       200        168.0      0.8      0.0          batch_idx = []
-   415                                           
-   416      4200       3974.0      0.9      0.0          for i, mol_tree in enumerate(mol_batch):
-   417     61586     125782.0      2.0      0.0              for node_id, node in mol_tree.nodes.items():
-   418     57586      54028.0      0.9      0.0                  if node['is_leaf'] or len(node['cands']) == 1:
-   419     21381      16100.0      0.8      0.0                      continue
-   420     16794      65975.0      3.9      0.0                  cands.extend([(cand, mol_tree, node_id) for cand in node['cand_mols']])
-   421     16794      20448.0      1.2      0.0                  batch_idx.extend([i] * len(node['cands']))
-   422                                           
-   423       200  919226138.0 4596130.7     99.6          cand_vec = self.jtmpn(cands, mol_tree_batch)
-   424       200      21952.0    109.8      0.0          cand_vec = self.G_mean(cand_vec)
-   425                                           
-   426       200      74515.0    372.6      0.0          batch_idx = cuda(torch.LongTensor(batch_idx))
-   427       200      41784.0    208.9      0.0          mol_vec = mol_vec[batch_idx]
-   428                                           
-   429       200       2878.0     14.4      0.0          mol_vec = mol_vec.view(-1, 1, self.latent_size // 2)
-   430       200       1216.0      6.1      0.0          cand_vec = cand_vec.view(-1, self.latent_size // 2, 1)
-   431       200      14539.0     72.7      0.0          scores = (mol_vec @ cand_vec)[:, 0, 0]
-   432                                           
-   433       200        242.0      1.2      0.0          cnt, tot, acc = 0, 0, 0
-   434       200        215.0      1.1      0.0          all_loss = []
-   435      4200       5095.0      1.2      0.0          for i, mol_tree in enumerate(mol_batch):
-   436      4000     122305.0     30.6      0.0              comp_nodes = [node_id for node_id, node in mol_tree.nodes.items()
-   437                                                                     if len(node['cands']) > 1 and not node['is_leaf']]
-   438      4000       4670.0      1.2      0.0              cnt += len(comp_nodes)
-   439                                                       # segmented accuracy and cross entropy
-   440     20794      24962.0      1.2      0.0              for node_id in comp_nodes:
-   441     16794      77050.0      4.6      0.0                  node = mol_tree.nodes[node_id]
-   442     16794      31957.0      1.9      0.0                  label = node['cands'].index(node['label'])
-   443     16794      16872.0      1.0      0.0                  ncand = len(node['cands'])
-   444     16794     136849.0      8.1      0.0                  cur_score = scores[tot:tot+ncand]
-   445     16794      16228.0      1.0      0.0                  tot += ncand
-   446                                           
-   447     16794    1128172.0     67.2      0.1                  if cur_score[label].item() >= cur_score.max().item():
-   448      8198      10585.0      1.3      0.0                      acc += 1
-   449                                           
-   450     16794     420641.0     25.0      0.0                  label = cuda(torch.LongTensor([label]))
-   451     16794      17897.0      1.1      0.0                  all_loss.append(
-   452     16794     895502.0     53.3      0.1                      F.cross_entropy(cur_score.view(1, -1), label, size_average=False))
-   453                                           
-   454       200     194229.0    971.1      0.0          all_loss = sum(all_loss) / len(mol_batch)
-   455       200        351.0      1.8      0.0          return all_loss, acc / cnt
+   422                                               @profile
+   423                                               def assm(self, mol_batch, mol_tree_batch, mol_vec):
+   424       200        264.0      1.3      0.0          cands = []
+   425       200        179.0      0.9      0.0          batch_idx = []
+   426                                           
+   427      4200       4080.0      1.0      0.0          for i, mol_tree in enumerate(mol_batch):
+   428     61586     127989.0      2.1      0.0              for node_id, node in mol_tree.nodes.items():
+   429     57586      54752.0      1.0      0.0                  if node['is_leaf'] or len(node['cands']) == 1:
+   430     21381      16526.0      0.8      0.0                      continue
+   431     16794      77228.0      4.6      0.0                  cands.extend([(cand, mol_tree, node_id) for cand in node['cand_mols']])
+   432     16794      21382.0      1.3      0.0                  batch_idx.extend([i] * len(node['cands']))
+   433                                           
+   434       200  956899828.0 4784499.1     99.6          cand_vec = self.jtmpn(cands, mol_tree_batch)
+   435       200      23708.0    118.5      0.0          cand_vec = self.G_mean(cand_vec)
+   436                                           
+   437       200      94443.0    472.2      0.0          batch_idx = cuda(torch.LongTensor(batch_idx))
+   438       200      46900.0    234.5      0.0          mol_vec = mol_vec[batch_idx]
+   439                                           
+   440       200       2518.0     12.6      0.0          mol_vec = mol_vec.view(-1, 1, self.latent_size // 2)
+   441       200       1084.0      5.4      0.0          cand_vec = cand_vec.view(-1, self.latent_size // 2, 1)
+   442       200      15824.0     79.1      0.0          scores = (mol_vec @ cand_vec)[:, 0, 0]
+   443                                           
+   444       200        253.0      1.3      0.0          cnt, tot, acc = 0, 0, 0
+   445       200        207.0      1.0      0.0          all_loss = []
+   446      4200       5270.0      1.3      0.0          for i, mol_tree in enumerate(mol_batch):
+   447      4000     126712.0     31.7      0.0              comp_nodes = [node_id for node_id, node in mol_tree.nodes.items()
+   448                                                                     if len(node['cands']) > 1 and not node['is_leaf']]
+   449      4000       4727.0      1.2      0.0              cnt += len(comp_nodes)
+   450                                                       # segmented accuracy and cross entropy
+   451     20794      25349.0      1.2      0.0              for node_id in comp_nodes:
+   452     16794      77831.0      4.6      0.0                  node = mol_tree.nodes[node_id]
+   453     16794      32941.0      2.0      0.0                  label = node['cands'].index(node['label'])
+   454     16794      17722.0      1.1      0.0                  ncand = len(node['cands'])
+   455     16794     140626.0      8.4      0.0                  cur_score = scores[tot:tot+ncand]
+   456     16794      16911.0      1.0      0.0                  tot += ncand
+   457                                           
+   458     16794    1218926.0     72.6      0.1                  if cur_score[label].item() >= cur_score.max().item():
+   459      8166      10785.0      1.3      0.0                      acc += 1
+   460                                           
+   461     16794     451152.0     26.9      0.0                  label = cuda(torch.LongTensor([label]))
+   462     16794      18200.0      1.1      0.0                  all_loss.append(
+   463     16794     922355.0     54.9      0.1                      F.cross_entropy(cur_score.view(1, -1), label, size_average=False))
+   464                                           
+   465       200     203247.0   1016.2      0.0          all_loss = sum(all_loss) / len(mol_batch)
+   466       200        344.0      1.7      0.0          return all_loss, acc / cnt
 
-Total time: 13.4046 s
+Total time: 14.0112 s
 File: /home/gq/ML/icml18-jtnn/jtnn/jtnn_vae.py
-Function: stereo at line 457
+Function: stereo at line 468
 
 Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
-   457                                               @profile
-   458                                               def stereo(self, mol_batch, mol_vec):
-   459       200        185.0      0.9      0.0          stereo_cands, batch_idx = [], []
-   460       200        146.0      0.7      0.0          labels = []
-   461      4200       2775.0      0.7      0.0          for i, mol_tree in enumerate(mol_batch):
-   462      4000       2883.0      0.7      0.0              cands = mol_tree.stereo_cands
-   463      4000       2744.0      0.7      0.0              if len(cands) == 1:
-   464      3726       2283.0      0.6      0.0                  continue
-   465       274        283.0      1.0      0.0              if mol_tree.smiles3D not in cands:
-   466        12         10.0      0.8      0.0                  cands.append(mol_tree.smiles3D)
-   467       274        253.0      0.9      0.0              stereo_cands.extend(cands)
-   468       274        360.0      1.3      0.0              batch_idx.extend([i] * len(cands))
-   469       274        340.0      1.2      0.0              labels.append((cands.index(mol_tree.smiles3D), len(cands)))
-   470                                           
-   471       200        141.0      0.7      0.0          if len(labels) == 0:
-   472                                                       # Only one stereoisomer exists; do nothing
-   473        51       1738.0     34.1      0.0              return cuda(torch.tensor(0.)), 1.
-   474                                           
-   475       149       4370.0     29.3      0.0          batch_idx = cuda(torch.LongTensor(batch_idx))
-   476       149   13279642.0  89125.1     99.1          stereo_cands = self.mpn(mol2dgl(stereo_cands))
-   477       149       8243.0     55.3      0.1          stereo_cands = self.G_mean(stereo_cands)
-   478       149      26982.0    181.1      0.2          stereo_labels = mol_vec[batch_idx]
-   479       149      16589.0    111.3      0.1          scores = F.cosine_similarity(stereo_cands, stereo_labels)
-   480                                           
-   481       149        161.0      1.1      0.0          st, acc = 0, 0
-   482       149        111.0      0.7      0.0          all_loss = []
-   483       423        408.0      1.0      0.0          for label, le in labels:
-   484       274       2118.0      7.7      0.0              cur_scores = scores[st:st+le]
-   485       274      19516.0     71.2      0.1              if cur_scores.data[label].item() >= cur_scores.max().item():
-   486        76         93.0      1.2      0.0                  acc += 1
-   487       274       7699.0     28.1      0.1              label = cuda(torch.LongTensor([label]))
-   488       274        267.0      1.0      0.0              all_loss.append(
-   489       274      17259.0     63.0      0.1                  F.cross_entropy(cur_scores.view(1, -1), label, size_average=False))
-   490       274        346.0      1.3      0.0              st += le
+   468                                               @profile
+   469                                               def stereo(self, mol_batch, mol_vec):
+   470       200        187.0      0.9      0.0          stereo_cands, batch_idx = [], []
+   471       200        149.0      0.7      0.0          labels = []
+   472      4200       3190.0      0.8      0.0          for i, mol_tree in enumerate(mol_batch):
+   473      4000       3412.0      0.9      0.0              cands = mol_tree.stereo_cands
+   474      4000       2855.0      0.7      0.0              if len(cands) == 1:
+   475      3726       2374.0      0.6      0.0                  continue
+   476       274        301.0      1.1      0.0              if mol_tree.smiles3D not in cands:
+   477        12         10.0      0.8      0.0                  cands.append(mol_tree.smiles3D)
+   478       274        322.0      1.2      0.0              stereo_cands.extend(cands)
+   479       274        399.0      1.5      0.0              batch_idx.extend([i] * len(cands))
+   480       274        372.0      1.4      0.0              labels.append((cands.index(mol_tree.smiles3D), len(cands)))
+   481                                           
+   482       200        156.0      0.8      0.0          if len(labels) == 0:
+   483                                                       # Only one stereoisomer exists; do nothing
+   484        53       2723.0     51.4      0.0              return cuda(torch.tensor(0.)), 1.
+   485                                           
+   486       147       6767.0     46.0      0.0          batch_idx = cuda(torch.LongTensor(batch_idx))
+   487       147   13872325.0  94369.6     99.0          stereo_cands = self.mpn(mol2dgl(stereo_cands))
+   488       147       8467.0     57.6      0.1          stereo_cands = self.G_mean(stereo_cands)
+   489       147      30876.0    210.0      0.2          stereo_labels = mol_vec[batch_idx]
+   490       147      16874.0    114.8      0.1          scores = F.cosine_similarity(stereo_cands, stereo_labels)
    491                                           
-   492       149       6435.0     43.2      0.0          all_loss = sum(all_loss) / len(labels)
-   493       149        235.0      1.6      0.0          return all_loss, acc / len(labels)
+   492       147        162.0      1.1      0.0          st, acc = 0, 0
+   493       147        123.0      0.8      0.0          all_loss = []
+   494       421        441.0      1.0      0.0          for label, le in labels:
+   495       274       2180.0      8.0      0.0              cur_scores = scores[st:st+le]
+   496       274      22477.0     82.0      0.2              if cur_scores.data[label].item() >= cur_scores.max().item():
+   497        91        109.0      1.2      0.0                  acc += 1
+   498       274       8260.0     30.1      0.1              label = cuda(torch.LongTensor([label]))
+   499       274        269.0      1.0      0.0              all_loss.append(
+   500       274      18257.0     66.6      0.1                  F.cross_entropy(cur_scores.view(1, -1), label, size_average=False))
+   501       274        335.0      1.2      0.0              st += le
+   502                                           
+   503       147       6598.0     44.9      0.0          all_loss = sum(all_loss) / len(labels)
+   504       147        230.0      1.6      0.0          return all_loss, acc / len(labels)
 
 Total time: 0 s
 File: /home/gq/ML/icml18-jtnn/jtnn/mpn.py
@@ -1040,7 +1069,7 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
     88                                           
     89                                               return fatoms, fbonds, cuda(agraph), cuda(bgraph), scope
 
-Total time: 18.5871 s
+Total time: 19.2468 s
 File: /home/gq/ML/icml18-jtnn/jtnn/mpn.py
 Function: mol2dgl at line 91
 
@@ -1048,38 +1077,38 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
     91                                           @profile
     92                                           def mol2dgl(smiles_batch):
-    93       349        261.0      0.7      0.0      n_nodes = 0
-    94       349        200.0      0.6      0.0      graph_list = []
-    95      5443       3478.0      0.6      0.0      for smiles in smiles_batch:
-    96      5094      58085.0     11.4      0.3          atom_feature_list = []
-    97      5094      55582.0     10.9      0.3          bond_feature_list = []
-    98      5094       2801.0      0.5      0.0          bond_source_feature_list = []
-    99      5094     115437.0     22.7      0.6          graph = DGLGraph()
-   100      5094     867127.0    170.2      4.7          mol = get_mol(smiles)
-   101    122880     772987.0      6.3      4.2          for atom in mol.GetAtoms():
-   102    117786    2156181.0     18.3     11.6              graph.add_node(atom.GetIdx())
-   103    117786    4634029.0     39.3     24.9              atom_feature_list.append(atom_features(atom))
-   104    131867     792223.0      6.0      4.3          for bond in mol.GetBonds():
-   105    126773     197513.0      1.6      1.1              begin_idx = bond.GetBeginAtom().GetIdx()
-   106    126773     126737.0      1.0      0.7              end_idx = bond.GetEndAtom().GetIdx()
-   107    126773    3793311.0     29.9     20.4              features = bond_features(bond)
-   108    126773    1912201.0     15.1     10.3              graph.add_edge(begin_idx, end_idx)
-   109    126773      87694.0      0.7      0.5              bond_feature_list.append(features)
+    93       347        231.0      0.7      0.0      n_nodes = 0
+    94       347        229.0      0.7      0.0      graph_list = []
+    95      5441       3821.0      0.7      0.0      for smiles in smiles_batch:
+    96      5094      63646.0     12.5      0.3          atom_feature_list = []
+    97      5094      59115.0     11.6      0.3          bond_feature_list = []
+    98      5094       2997.0      0.6      0.0          bond_source_feature_list = []
+    99      5094     120768.0     23.7      0.6          graph = DGLGraph()
+   100      5094     924317.0    181.5      4.8          mol = get_mol(smiles)
+   101    122880     819587.0      6.7      4.3          for atom in mol.GetAtoms():
+   102    117786    1693772.0     14.4      8.8              graph.add_node(atom.GetIdx())
+   103    117786    4742395.0     40.3     24.6              atom_feature_list.append(atom_features(atom))
+   104    131867     841121.0      6.4      4.4          for bond in mol.GetBonds():
+   105    126773     201379.0      1.6      1.0              begin_idx = bond.GetBeginAtom().GetIdx()
+   106    126773     133906.0      1.1      0.7              end_idx = bond.GetEndAtom().GetIdx()
+   107    126773    4082543.0     32.2     21.2              features = bond_features(bond)
+   108    126773    1754349.0     13.8      9.1              graph.add_edge(begin_idx, end_idx)
+   109    126773      89929.0      0.7      0.5              bond_feature_list.append(features)
    110                                                       # set up the reverse direction
-   111    126773     971895.0      7.7      5.2              graph.add_edge(end_idx, begin_idx)
-   112    126773      80941.0      0.6      0.4              bond_feature_list.append(features)
+   111    126773    1426625.0     11.3      7.4              graph.add_edge(end_idx, begin_idx)
+   112    126773      84742.0      0.7      0.4              bond_feature_list.append(features)
    113                                           
-   114      5094     493552.0     96.9      2.7          atom_x = torch.stack(atom_feature_list)
-   115      5094     154153.0     30.3      0.8          graph.set_n_repr({'x': atom_x})
-   116      5094       4846.0      1.0      0.0          if len(bond_feature_list) > 0:
-   117      5094     785274.0    154.2      4.2              bond_x = torch.stack(bond_feature_list)
-   118      5094       5758.0      1.1      0.0              graph.set_e_repr({
-   119      5094       2752.0      0.5      0.0                  'x': bond_x,
-   120      5094     506583.0     99.4      2.7                  'src_x': atom_x.new(len(bond_feature_list), ATOM_FDIM).zero_()
+   114      5094     528566.0    103.8      2.7          atom_x = torch.stack(atom_feature_list)
+   115      5094     164070.0     32.2      0.9          graph.set_n_repr({'x': atom_x})
+   116      5094       5138.0      1.0      0.0          if len(bond_feature_list) > 0:
+   117      5094     820920.0    161.2      4.3              bond_x = torch.stack(bond_feature_list)
+   118      5094       6010.0      1.2      0.0              graph.set_e_repr({
+   119      5094       2814.0      0.6      0.0                  'x': bond_x,
+   120      5094     667981.0    131.1      3.5                  'src_x': atom_x.new(len(bond_feature_list), ATOM_FDIM).zero_()
    121                                                       })
-   122      5094       5366.0      1.1      0.0          graph_list.append(graph)
+   122      5094       5635.0      1.1      0.0          graph_list.append(graph)
    123                                           
-   124       349        165.0      0.5      0.0      return graph_list
+   124       347        177.0      0.5      0.0      return graph_list
 
 Total time: 0 s
 File: /home/gq/ML/icml18-jtnn/jtnn/mpn.py
@@ -1117,71 +1146,82 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
    165                                                   mol_vecs = torch.stack(mol_vecs, dim=0)
    166                                                   return mol_vecs
 
-Total time: 39.8214 s
+Total time: 42.0083 s
 File: /home/gq/ML/icml18-jtnn/jtnn/mpn.py
-Function: forward at line 230
+Function: forward at line 235
 
 Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
-   230                                               @profile
-   231                                               def forward(self, mol_graph_list):
-   232       349    5418675.0  15526.3     13.6          mol_graph = batch(mol_graph_list)
-   233       349   31090829.0  89085.5     78.1          mol_line_graph = line_graph(mol_graph, no_backtracking=True)
-   234       349    2512813.0   7200.0      6.3          mol_graph = self.run(mol_graph, mol_line_graph)
-   235       349     580995.0   1664.7      1.5          mol_graph_list = unbatch(mol_graph)
-   236       349     217755.0    623.9      0.5          g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in mol_graph_list], 0)
-   237                                           
-   238       349        351.0      1.0      0.0          return g_repr
+   235                                               @profile
+   236                                               def forward(self, mol_graph_list):
+   237       347        342.0      1.0      0.0          n_samples = len(mol_graph_list)
+   238                                           
+   239       347    6636557.0  19125.5     15.8          mol_graph = batch(mol_graph_list)
+   240       347   31643669.0  91192.1     75.3          mol_line_graph = line_graph(mol_graph, no_backtracking=True)
+   241                                           
+   242       347       2209.0      6.4      0.0          n_nodes = len(mol_graph.nodes)
+   243       347     138653.0    399.6      0.3          n_edges = len(mol_graph.edges)
+   244                                           
+   245       347    2746003.0   7913.6      6.5          mol_graph = self.run(mol_graph, mol_line_graph)
+   246       347     605356.0   1744.5      1.4          mol_graph_list = unbatch(mol_graph)
+   247       347     226526.0    652.8      0.5          g_repr = torch.stack([g.get_n_repr()['h'].mean(0) for g in mol_graph_list], 0)
+   248                                           
+   249       347       3913.0     11.3      0.0          self.n_samples_total += n_samples
+   250       347       1770.0      5.1      0.0          self.n_nodes_total += n_nodes
+   251       347       1606.0      4.6      0.0          self.n_edges_total += n_edges
+   252       347       1530.0      4.4      0.0          self.n_passes += 1
+   253                                           
+   254       347        177.0      0.5      0.0          return g_repr
 
-Total time: 2.4995 s
+Total time: 2.73147 s
 File: /home/gq/ML/icml18-jtnn/jtnn/mpn.py
-Function: run at line 240
+Function: run at line 256
 
 Line #      Hits         Time  Per Hit   % Time  Line Contents
 ==============================================================
-   240                                               @profile
-   241                                               def run(self, mol_graph, mol_line_graph):
-   242       349       1558.0      4.5      0.1          n_nodes = len(mol_graph.nodes)
-   243                                           
-   244       349        304.0      0.9      0.0          mol_graph.update_edge(
-   245                                                       #*zip(*mol_graph.edge_list),
-   246       349        285.0      0.8      0.0              edge_func=lambda src, dst, edge: {'src_x': src['x']},
-   247       349     654735.0   1876.0     26.2              batchable=True,
-   248                                                   )
-   249                                           
-   250       349       5809.0     16.6      0.2          bond_features = mol_line_graph.get_n_repr()['x']
-   251       349       4004.0     11.5      0.2          source_features = mol_line_graph.get_n_repr()['src_x']
-   252                                           
-   253       349      12631.0     36.2      0.5          features = torch.cat([source_features, bond_features], 1)
-   254       349      22425.0     64.3      0.9          msg_input = self.W_i(features)
-   255       349        393.0      1.1      0.0          mol_line_graph.set_n_repr({
-   256       349        198.0      0.6      0.0              'msg_input': msg_input,
-   257       349       7830.0     22.4      0.3              'msg': F.relu(msg_input),
-   258       349      21221.0     60.8      0.8              'accum_msg': torch.zeros_like(msg_input),
-   259                                                   })
-   260       349        346.0      1.0      0.0          mol_graph.set_n_repr({
-   261       349       7061.0     20.2      0.3              'm': bond_features.new(n_nodes, self.hidden_size).zero_(),
-   262       349      13955.0     40.0      0.6              'h': bond_features.new(n_nodes, self.hidden_size).zero_(),
-   263                                                   })
-   264                                           
-   265      1047       1729.0      1.7      0.1          for i in range(self.depth - 1):
-   266       698        617.0      0.9      0.0              mol_line_graph.update_all(
-   267       698        526.0      0.8      0.0                  mpn_loopy_bp_msg,
-   268       698        455.0      0.7      0.0                  mpn_loopy_bp_reduce,
-   269       698       3073.0      4.4      0.1                  self.loopy_bp_updater,
-   270       698     869281.0   1245.4     34.8                  True
-   271                                                       )
-   272                                           
-   273       349        310.0      0.9      0.0          mol_graph.update_all(
-   274       349        233.0      0.7      0.0              mpn_gather_msg,
-   275       349        250.0      0.7      0.0              mpn_gather_reduce,
-   276       349       1565.0      4.5      0.1              self.gather_updater,
-   277       349     868292.0   2487.9     34.7              True
-   278                                                   )
-   279                                           
-   280       349        412.0      1.2      0.0          return mol_graph
+   256                                               @profile
+   257                                               def run(self, mol_graph, mol_line_graph):
+   258       347       1310.0      3.8      0.0          n_nodes = len(mol_graph.nodes)
+   259                                           
+   260       347        355.0      1.0      0.0          mol_graph.update_edge(
+   261                                                       #*zip(*mol_graph.edge_list),
+   262       347        281.0      0.8      0.0              edge_func=lambda src, dst, edge: {'src_x': src['x']},
+   263       347     536352.0   1545.7     19.6              batchable=True,
+   264                                                   )
+   265                                           
+   266       347       6016.0     17.3      0.2          bond_features = mol_line_graph.get_n_repr()['x']
+   267       347       4054.0     11.7      0.1          source_features = mol_line_graph.get_n_repr()['src_x']
+   268                                           
+   269       347      15388.0     44.3      0.6          features = torch.cat([source_features, bond_features], 1)
+   270       347      23805.0     68.6      0.9          msg_input = self.W_i(features)
+   271       347        431.0      1.2      0.0          mol_line_graph.set_n_repr({
+   272       347        229.0      0.7      0.0              'msg_input': msg_input,
+   273       347       8405.0     24.2      0.3              'msg': F.relu(msg_input),
+   274       347      22206.0     64.0      0.8              'accum_msg': torch.zeros_like(msg_input),
+   275                                                   })
+   276       347        425.0      1.2      0.0          mol_graph.set_n_repr({
+   277       347       7849.0     22.6      0.3              'm': bond_features.new(n_nodes, self.hidden_size).zero_(),
+   278       347      14495.0     41.8      0.5              'h': bond_features.new(n_nodes, self.hidden_size).zero_(),
+   279                                                   })
+   280                                           
+   281      1041       1898.0      1.8      0.1          for i in range(self.depth - 1):
+   282       694        585.0      0.8      0.0              mol_line_graph.update_all(
+   283       694        494.0      0.7      0.0                  mpn_loopy_bp_msg,
+   284       694        517.0      0.7      0.0                  mpn_loopy_bp_reduce,
+   285       694       3108.0      4.5      0.1                  self.loopy_bp_updater,
+   286       694    1044583.0   1505.2     38.2                  True
+   287                                                       )
+   288                                           
+   289       347        431.0      1.2      0.0          mol_graph.update_all(
+   290       347        290.0      0.8      0.0              mpn_gather_msg,
+   291       347        235.0      0.7      0.0              mpn_gather_reduce,
+   292       347       1483.0      4.3      0.1              self.gather_updater,
+   293       347    1035783.0   2985.0     37.9              True
+   294                                                   )
+   295                                           
+   296       347        465.0      1.3      0.0          return mol_graph
 
-Total time: 2021.2 s
+Total time: 2095.75 s
 File: molvae/vaetrain_dgl.py
 Function: train at line 64
 
@@ -1190,43 +1230,43 @@ Line #      Hits         Time  Per Hit   % Time  Line Contents
     64                                           @profile
     65                                           def train():
     66         2          6.0      3.0      0.0      for epoch in range(MAX_EPOCH):
-    67         1         35.0     35.0      0.0          dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=lambda x:x, drop_last=True)
+    67         1         33.0     33.0      0.0          dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=lambda x:x, drop_last=True)
     68                                           
     69         1          1.0      1.0      0.0          word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
     70                                           
-    71       201  922776063.0 4590925.7     45.7          for it, batch in enumerate(dataloader):
-    72      4200       3662.0      0.9      0.0              for mol_tree in batch:
-    73     61586     120665.0      2.0      0.0                  for node_id, node in mol_tree.nodes.items():
-    74     57586      60642.0      1.1      0.0                      if node['label'] not in node['cands']:
-    75        12         16.0      1.3      0.0                          node['cands'].append(node['label'])
+    71       201  947673200.0 4714792.0     45.2          for it, batch in enumerate(dataloader):
+    72      4200       3661.0      0.9      0.0              for mol_tree in batch:
+    73     61586     121298.0      2.0      0.0                  for node_id, node in mol_tree.nodes.items():
+    74     57586      64502.0      1.1      0.0                      if node['label'] not in node['cands']:
+    75        12         14.0      1.2      0.0                          node['cands'].append(node['label'])
     76        12         13.0      1.1      0.0                          node['cand_mols'].append(node['label_mol'])
     77                                           
-    78       200     125866.0    629.3      0.0              model.zero_grad()
-    79       200 1064950008.0 5324750.0     52.7              loss, kl_div, wacc, tacc, sacc, dacc = model(batch, beta)
-    80       200   32196859.0 160984.3      1.6              loss.backward()
-    81       200     538100.0   2690.5      0.0              optimizer.step()
+    78       200     128894.0    644.5      0.0              model.zero_grad()
+    79       200 1113656329.0 5568281.6     53.1              loss, kl_div, wacc, tacc, sacc, dacc = model(batch, beta)
+    80       200   33516066.0 167580.3      1.6              loss.backward()
+    81       200     552189.0   2760.9      0.0              optimizer.step()
     82                                           
-    83       200       2732.0     13.7      0.0              word_acc += wacc
-    84       200       1904.0      9.5      0.0              topo_acc += tacc
-    85       200        239.0      1.2      0.0              assm_acc += sacc
-    86       200        188.0      0.9      0.0              steo_acc += dacc
+    83       200       2876.0     14.4      0.0              word_acc += wacc
+    84       200       2020.0     10.1      0.0              topo_acc += tacc
+    85       200        244.0      1.2      0.0              assm_acc += sacc
+    86       200        189.0      0.9      0.0              steo_acc += dacc
     87                                           
-    88       200        307.0      1.5      0.0              if (it + 1) % PRINT_ITER == 0:
-    89        10        260.0     26.0      0.0                  word_acc = word_acc / PRINT_ITER * 100
-    90        10        206.0     20.6      0.0                  topo_acc = topo_acc / PRINT_ITER * 100
-    91        10         14.0      1.4      0.0                  assm_acc = assm_acc / PRINT_ITER * 100
-    92        10         10.0      1.0      0.0                  steo_acc = steo_acc / PRINT_ITER * 100
+    88       200        357.0      1.8      0.0              if (it + 1) % PRINT_ITER == 0:
+    89        10        317.0     31.7      0.0                  word_acc = word_acc / PRINT_ITER * 100
+    90        10        241.0     24.1      0.0                  topo_acc = topo_acc / PRINT_ITER * 100
+    91        10         16.0      1.6      0.0                  assm_acc = assm_acc / PRINT_ITER * 100
+    92        10          9.0      0.9      0.0                  steo_acc = steo_acc / PRINT_ITER * 100
     93                                           
-    94        10        641.0     64.1      0.0                  print("KL: %.1f, Word: %.2f, Topo: %.2f, Assm: %.2f, Steo: %.2f" % (kl_div, word_acc, topo_acc, assm_acc, steo_acc))
-    95        10         38.0      3.8      0.0                  word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
-    96        10         18.0      1.8      0.0                  sys.stdout.flush()
+    94        10        731.0     73.1      0.0                  print("KL: %.1f, Word: %.2f, Topo: %.2f, Assm: %.2f, Steo: %.2f" % (kl_div, word_acc, topo_acc, assm_acc, steo_acc))
+    95        10         39.0      3.9      0.0                  word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
+    96        10         22.0      2.2      0.0                  sys.stdout.flush()
     97                                           
-    98       200        184.0      0.9      0.0              if (it + 1) % 1500 == 0: #Fast annealing
+    98       200        192.0      1.0      0.0              if (it + 1) % 1500 == 0: #Fast annealing
     99                                                           scheduler.step()
    100                                                           print("learning rate: %.6f" % scheduler.get_lr()[0])
    101                                                           torch.save(model.state_dict(), opts.save_path + "/model.iter-%d-%d" % (epoch, it + 1))
    102                                           
    103         1         12.0     12.0      0.0          scheduler.step()
-   104         1         10.0     10.0      0.0          print("learning rate: %.6f" % scheduler.get_lr()[0])
-   105         1     417318.0 417318.0      0.0          torch.save(model.state_dict(), opts.save_path + "/model.iter-" + str(epoch))
+   104         1          9.0      9.0      0.0          print("learning rate: %.6f" % scheduler.get_lr()[0])
+   105         1      30923.0  30923.0      0.0          torch.save(model.state_dict(), opts.save_path + "/model.iter-" + str(epoch))
 
