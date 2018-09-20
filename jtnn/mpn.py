@@ -22,22 +22,22 @@ def onek_encoding_unk(x, allowable_set):
     return [x == s for s in allowable_set]
 
 def atom_features(atom):
-    return torch.Tensor(onek_encoding_unk(atom.GetSymbol(), ELEM_LIST) 
+    return cuda(torch.Tensor(onek_encoding_unk(atom.GetSymbol(), ELEM_LIST) 
             + onek_encoding_unk(atom.GetDegree(), [0,1,2,3,4,5]) 
             + onek_encoding_unk(atom.GetFormalCharge(), [-1,-2,1,2,0])
             + onek_encoding_unk(int(atom.GetChiralTag()), [0,1,2,3])
-            + [atom.GetIsAromatic()])
+            + [atom.GetIsAromatic()]))
 
 def bond_features(bond):
     bt = bond.GetBondType()
     stereo = int(bond.GetStereo())
     fbond = [bt == Chem.rdchem.BondType.SINGLE, bt == Chem.rdchem.BondType.DOUBLE, bt == Chem.rdchem.BondType.TRIPLE, bt == Chem.rdchem.BondType.AROMATIC, bond.IsInRing()]
     fstereo = onek_encoding_unk(stereo, [0,1,2,3,4,5])
-    return torch.Tensor(fbond + fstereo)
+    return cuda(torch.Tensor(fbond + fstereo))
 
 @profile
 def mol2graph(mol_batch):
-    padding = torch.zeros(ATOM_FDIM + BOND_FDIM)
+    padding = cuda(torch.zeros(ATOM_FDIM + BOND_FDIM))
     fatoms,fbonds = [],[padding] #Ensure bond is 1-indexed
     in_bonds,all_bonds = [],[(-1,-1)] #Ensure bond is 1-indexed
     scope = []
@@ -86,7 +86,7 @@ def mol2graph(mol_batch):
             if all_bonds[b2][0] != y:
                 bgraph[b1,i] = b2
 
-    return fatoms, fbonds, agraph, bgraph, scope
+    return fatoms, fbonds, cuda(agraph), cuda(bgraph), scope
 
 @profile
 def mol2dgl(smiles_batch):

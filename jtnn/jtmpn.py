@@ -27,14 +27,14 @@ def onek_encoding_unk(x, allowable_set):
 # the 2-D graph first, then enumerate all possible 3-D forms and find the
 # one with highest score.
 def atom_features(atom):
-    return torch.Tensor(onek_encoding_unk(atom.GetSymbol(), ELEM_LIST) 
+    return cuda(torch.Tensor(onek_encoding_unk(atom.GetSymbol(), ELEM_LIST) 
             + onek_encoding_unk(atom.GetDegree(), [0,1,2,3,4,5]) 
             + onek_encoding_unk(atom.GetFormalCharge(), [-1,-2,1,2,0])
-            + [atom.GetIsAromatic()])
+            + [atom.GetIsAromatic()]))
 
 def bond_features(bond):
     bt = bond.GetBondType()
-    return torch.Tensor([bt == Chem.rdchem.BondType.SINGLE, bt == Chem.rdchem.BondType.DOUBLE, bt == Chem.rdchem.BondType.TRIPLE, bt == Chem.rdchem.BondType.AROMATIC, bond.IsInRing()])
+    return cuda(torch.Tensor([bt == Chem.rdchem.BondType.SINGLE, bt == Chem.rdchem.BondType.DOUBLE, bt == Chem.rdchem.BondType.TRIPLE, bt == Chem.rdchem.BondType.AROMATIC, bond.IsInRing()]))
 
 
 class JTMPN(nn.Module):
@@ -52,7 +52,7 @@ class JTMPN(nn.Module):
     def forward(self, cand_batch, tree_mess):
         fatoms,fbonds = [],[] 
         in_bonds,all_bonds = [],[] 
-        mess_dict,all_mess = {},[create_var(torch.zeros(self.hidden_size))] #Ensure index 0 is vec(0)
+        mess_dict,all_mess = {},[create_var(cuda(torch.zeros(self.hidden_size)))] #Ensure index 0 is vec(0)
         total_atoms = 0
         scope = []
 
@@ -120,10 +120,22 @@ class JTMPN(nn.Module):
                 if b2 < total_mess or all_bonds[b2-total_mess][0] != y:
                     bgraph[b1,i] = b2
 
+        atom_hiddens = self.run(fatoms, fbonds, agraph, bgraph, tree_message)
+        
+        mol_vecs = []
+        for st,le in scope:
+            mol_vec = atom_hiddens.narrow(0, st, le).sum(dim=0) / le
+            mol_vecs.append(mol_vec)
+
+        mol_vecs = torch.stack(mol_vecs, dim=0)
+        return mol_vecs
+
+    @profile
+    def run(self, fatoms, fbonds, agraph, bgraph, tree_message):
         fatoms = create_var(fatoms)
         fbonds = create_var(fbonds)
-        agraph = create_var(agraph)
-        bgraph = create_var(bgraph)
+        agraph = create_var(cuda(agraph))
+        bgraph = create_var(cuda(bgraph))
 
         binput = self.W_i(fbonds)
         graph_message = nn.ReLU()(binput)
@@ -140,14 +152,9 @@ class JTMPN(nn.Module):
         nei_message = nei_message.sum(dim=1)
         ainput = torch.cat([fatoms, nei_message], dim=1)
         atom_hiddens = nn.ReLU()(self.W_o(ainput))
-        
-        mol_vecs = []
-        for st,le in scope:
-            mol_vec = atom_hiddens.narrow(0, st, le).sum(dim=0) / le
-            mol_vecs.append(mol_vec)
 
-        mol_vecs = torch.stack(mol_vecs, dim=0)
-        return mol_vecs
+        return atom_hiddens
+
 
 @profile
 def mol2dgl(cand_batch, mol_tree_batch):
@@ -341,7 +348,7 @@ class DGLJTMPN(nn.Module):
         # TODO: context
         if PAPER:
             cand_graphs.set_e_repr({
-                'alpha': torch.zeros(len(cand_graphs.edge_list), self.hidden_size)
+                'alpha': cuda(torch.zeros(len(cand_graphs.edge_list), self.hidden_size))
             })
 
             alpha = mol_tree_batch.get_e_repr(*zip(*tree_mess_src_edges))['m']

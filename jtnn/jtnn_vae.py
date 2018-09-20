@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .mol_tree import Vocab, MolTree
-from .nnutils import create_var
+from .nnutils import create_var, cuda
 from .jtnn_enc import JTNNEncoder, DGLJTNNEncoder
 from .jtnn_dec import JTNNDecoder, DGLJTNNDecoder
 from .mpn import MPN, mol2graph, DGLMPN, mol2dgl
@@ -33,7 +33,7 @@ def dgl_set_batch_nodeID(mol_batch, vocab):
             mol_tree.nodes[node]['idx'] = tot
             tot += 1
             wid.append(vocab.get_index(mol_tree.nodes[node]['smiles']))
-        mol_tree.set_n_repr({'wid': torch.LongTensor(wid)})
+        mol_tree.set_n_repr({'wid': cuda(torch.LongTensor(wid))})
 
 
 class JTNNVAE(nn.Module):
@@ -94,9 +94,9 @@ class JTNNVAE(nn.Module):
         z_log_var = torch.cat([tree_log_var,mol_log_var], dim=1)
         kl_loss = -0.5 * torch.sum(1.0 + z_log_var - z_mean * z_mean - torch.exp(z_log_var)) / batch_size
 
-        epsilon = create_var(torch.randn(batch_size, self.latent_size // 2), False) if e1 is None else e1
+        epsilon = create_var(cuda(torch.randn(batch_size, self.latent_size // 2)), False) if e1 is None else e1
         tree_vec = tree_mean + torch.exp(tree_log_var // 2) * epsilon
-        epsilon = create_var(torch.randn(batch_size, self.latent_size // 2), False) if e2 is None else e2
+        epsilon = create_var(cuda(torch.randn(batch_size, self.latent_size // 2)), False) if e2 is None else e2
         mol_vec = mol_mean + torch.exp(mol_log_var // 2) * epsilon
         
         word_loss, topo_loss, word_acc, topo_acc = self.decoder(mol_batch, tree_vec)
@@ -122,7 +122,7 @@ class JTNNVAE(nn.Module):
         cand_vec = self.jtmpn(cands, tree_mess)
         cand_vec = self.G_mean(cand_vec)
 
-        batch_idx = create_var(torch.LongTensor(batch_idx))
+        batch_idx = create_var(cuda(torch.LongTensor(batch_idx)))
         mol_vec = mol_vec.index_select(0, batch_idx)
 
         mol_vec = mol_vec.view(-1, 1, self.latent_size // 2)
@@ -143,7 +143,7 @@ class JTNNVAE(nn.Module):
                 if cur_score.data[label] >= cur_score.max().data[0]:
                     acc += 1
 
-                label = create_var(torch.LongTensor([label]))
+                label = create_var(cuda(torch.LongTensor([label])))
                 all_loss.append( self.assm_loss(cur_score.view(1,-1), label) )
         
         #all_loss = torch.stack(all_loss).sum() / len(mol_batch)
@@ -164,9 +164,9 @@ class JTNNVAE(nn.Module):
             labels.append( (cands.index(mol_tree.smiles3D), len(cands)) )
 
         if len(labels) == 0: 
-            return create_var(torch.tensor(0.)), 1.0
+            return create_var(cuda(torch.tensor(0.))), 1.0
 
-        batch_idx = create_var(torch.LongTensor(batch_idx))
+        batch_idx = create_var(cuda(torch.LongTensor(batch_idx)))
         stereo_cands = self.mpn(mol2graph(stereo_cands))
         stereo_cands = self.G_mean(stereo_cands)
         stereo_labels = mol_vec.index_select(0, batch_idx)
@@ -178,7 +178,7 @@ class JTNNVAE(nn.Module):
             cur_scores = scores.narrow(0, st, le)
             if cur_scores.data[label] >= cur_scores.max().data[0]: 
                 acc += 1
-            label = create_var(torch.LongTensor([label]))
+            label = create_var(cuda(torch.LongTensor([label])))
             all_loss.append( self.stereo_loss(cur_scores.view(1,-1), label) )
             st += le
         #all_loss = torch.cat(all_loss).sum() / len(labels)
@@ -384,9 +384,9 @@ class DGLJTNNVAE(nn.Module):
         self.z_mean = z_mean
         self.z_log_var = z_log_var
 
-        epsilon = torch.randn(batch_size, self.latent_size // 2) if e1 is None else e1
+        epsilon = cuda(torch.randn(batch_size, self.latent_size // 2)) if e1 is None else e1
         tree_vec = tree_mean + torch.exp(tree_log_var // 2) * epsilon
-        epsilon = torch.randn(batch_size, self.latent_size // 2) if e2 is None else e2
+        epsilon = cuda(torch.randn(batch_size, self.latent_size // 2)) if e2 is None else e2
         mol_vec = mol_mean + torch.exp(mol_log_var // 2) * epsilon
 
         self.tree_vec = tree_vec
@@ -423,7 +423,7 @@ class DGLJTNNVAE(nn.Module):
         cand_vec = self.jtmpn(cands, mol_tree_batch)
         cand_vec = self.G_mean(cand_vec)
 
-        batch_idx = torch.LongTensor(batch_idx)
+        batch_idx = cuda(torch.LongTensor(batch_idx))
         mol_vec = mol_vec[batch_idx]
 
         mol_vec = mol_vec.view(-1, 1, self.latent_size // 2)
@@ -447,7 +447,7 @@ class DGLJTNNVAE(nn.Module):
                 if cur_score[label].item() >= cur_score.max().item():
                     acc += 1
 
-                label = torch.LongTensor([label])
+                label = cuda(torch.LongTensor([label]))
                 all_loss.append(
                     F.cross_entropy(cur_score.view(1, -1), label, size_average=False))
 
@@ -470,9 +470,9 @@ class DGLJTNNVAE(nn.Module):
 
         if len(labels) == 0:
             # Only one stereoisomer exists; do nothing
-            return torch.tensor(0.), 1.
+            return cuda(torch.tensor(0.)), 1.
 
-        batch_idx = torch.LongTensor(batch_idx)
+        batch_idx = cuda(torch.LongTensor(batch_idx))
         stereo_cands = self.mpn(mol2dgl(stereo_cands))
         stereo_cands = self.G_mean(stereo_cands)
         stereo_labels = mol_vec[batch_idx]
@@ -484,7 +484,7 @@ class DGLJTNNVAE(nn.Module):
             cur_scores = scores[st:st+le]
             if cur_scores.data[label].item() >= cur_scores.max().item():
                 acc += 1
-            label = torch.LongTensor([label])
+            label = cuda(torch.LongTensor([label]))
             all_loss.append(
                 F.cross_entropy(cur_scores.view(1, -1), label, size_average=False))
             st += le

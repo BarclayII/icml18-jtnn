@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from collections import deque
 from .mol_tree import Vocab, MolTree
-from .nnutils import create_var, GRU, GRUUpdate
+from .nnutils import create_var, GRU, GRUUpdate, cuda
 import itertools
 import networkx as nx
 from dgl import batch, unbatch, line_graph
@@ -39,7 +39,7 @@ class JTNNEncoder(nn.Module):
         
         h = {}
         max_depth = max([len(x) for x in orders])
-        padding = create_var(torch.zeros(self.hidden_size), False)
+        padding = create_var(cuda(torch.zeros(self.hidden_size)), False)
 
         for t in range(max_depth):
             prop_list = []
@@ -63,7 +63,7 @@ class JTNNEncoder(nn.Module):
                 h_nei.extend([padding] * pad_len)
                 cur_h_nei.extend(h_nei)
 
-            cur_x = create_var(torch.LongTensor(cur_x))
+            cur_x = cuda(torch.LongTensor(cur_x))
             cur_x = self.embedding(cur_x)
             cur_h_nei = torch.cat(cur_h_nei, dim=0).view(-1,MAX_NB,self.hidden_size)
 
@@ -104,7 +104,7 @@ def node_aggregate(nodes, h, embedding, W):
     x_idx = []
     h_nei = []
     hidden_size = embedding.embedding_dim
-    padding = create_var(torch.zeros(hidden_size), False)
+    padding = create_var(cuda(torch.zeros(hidden_size)), False)
 
     for node_x in nodes:
         x_idx.append(node_x.wid)
@@ -115,7 +115,7 @@ def node_aggregate(nodes, h, embedding, W):
     
     h_nei = torch.cat(h_nei, dim=0).view(-1,MAX_NB,hidden_size)
     sum_h_nei = h_nei.sum(dim=1)
-    x_vec = create_var(torch.LongTensor(x_idx))
+    x_vec = cuda(torch.LongTensor(x_idx))
     x_vec = embedding(x_vec)
     node_vec = torch.cat([x_vec, sum_h_nei], dim=1)
     return nn.ReLU()(W(node_vec))
@@ -219,21 +219,21 @@ class DGLJTNNEncoder(nn.Module):
         # Assign structure embeddings to tree nodes
         mol_tree_batch.set_n_repr({
             'x': self.embedding(mol_tree_batch.get_n_repr()['wid']),
-            'h': torch.zeros(n_nodes, self.hidden_size),
+            'h': cuda(torch.zeros(n_nodes, self.hidden_size)),
         })
 
         # Initialize the intermediate variables according to Eq (4)-(8).
         # Also initialize the src_x and dst_x fields.
         # TODO: context?
         mol_tree_batch.set_e_repr({
-            's': torch.zeros(n_edges, self.hidden_size),
-            'm': torch.zeros(n_edges, self.hidden_size),
-            'r': torch.zeros(n_edges, self.hidden_size),
-            'z': torch.zeros(n_edges, self.hidden_size),
-            'src_x': torch.zeros(n_edges, self.hidden_size),
-            'dst_x': torch.zeros(n_edges, self.hidden_size),
-            'rm': torch.zeros(n_edges, self.hidden_size),
-            'accum_rm': torch.zeros(n_edges, self.hidden_size),
+            's': cuda(torch.zeros(n_edges, self.hidden_size)),
+            'm': cuda(torch.zeros(n_edges, self.hidden_size)),
+            'r': cuda(torch.zeros(n_edges, self.hidden_size)),
+            'z': cuda(torch.zeros(n_edges, self.hidden_size)),
+            'src_x': cuda(torch.zeros(n_edges, self.hidden_size)),
+            'dst_x': cuda(torch.zeros(n_edges, self.hidden_size)),
+            'rm': cuda(torch.zeros(n_edges, self.hidden_size)),
+            'accum_rm': cuda(torch.zeros(n_edges, self.hidden_size)),
         })
 
         # Send the source/destination node features to edges
