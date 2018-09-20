@@ -57,8 +57,8 @@ scheduler.step()
 
 dataset = DGLMoleculeDataset(opts.train_path)
 
-MAX_EPOCH = 7
-PRINT_ITER = 100
+MAX_EPOCH = 1
+PRINT_ITER = 20
 
 @profile
 def train():
@@ -93,7 +93,6 @@ def train():
                 print("KL: %.1f, Word: %.2f, Topo: %.2f, Assm: %.2f, Steo: %.2f" % (kl_div, word_acc, topo_acc, assm_acc, steo_acc))
                 word_acc,topo_acc,assm_acc,steo_acc = 0,0,0,0
                 sys.stdout.flush()
-                return
 
             if (it + 1) % 1500 == 0: #Fast annealing
                 scheduler.step()
